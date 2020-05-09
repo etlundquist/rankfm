@@ -1,16 +1,12 @@
-# exclude folders
+# excluded folders
 data/
+notebooks/old/
 
 # system files
 *.DS_Store
-
-# byte-compiled / optimized / DLL files
+*.pyc
+*.ipynb_checkpoints
 __pycache__/
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
 
 # distribution / packaging
 .Python
@@ -33,24 +29,5 @@ MANIFEST
 
 # sphinx documentation
 docs/_build/
-
-# jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
 
 
