@@ -36,12 +36,16 @@ class RankFM():
         self.user_to_index = None
         self.item_to_index = None
 
-        # pandas raw interactions and unique sets of users, items, user_items
+        # internal raw interactions data and user:items mapping
         self.interactions = None
+        self.user_items = None
+        
+        # unique lists of all users/items 
+        self.user_id = None
+        self.item_id = None
         self.user_idx = None
         self.item_idx = None
-        self.user_items = None
-
+        
         # number of unique users/items
         self.n_users = None
         self.n_items = None
@@ -50,6 +54,14 @@ class RankFM():
         self.w_item = None
         self.v_user = None
         self.v_item = None
+        
+        # internal state info
+        self.is_fit = False
+        
+        
+    # --------------------------------
+    # begin private method definitions
+    # --------------------------------
 
 
     def _initialize(self, interactions):
@@ -61,7 +73,11 @@ class RankFM():
 
         # copy the raw interactions data into a pandas dataframe for internal use
         self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
-
+        
+        # save the unique lists of users/items in terms of original identifiers
+        self.user_id = pd.Series(np.sort(np.unique(self.interactions['user_id'])))
+        self.item_id = pd.Series(np.sort(np.unique(self.interactions['item_id'])))
+        
         # create zero-based index position to identifier mappings
         self.index_to_user = pd.Series(np.sort(np.unique(self.interactions['user_id']))).to_dict()
         self.index_to_item = pd.Series(np.sort(np.unique(self.interactions['item_id']))).to_dict()
@@ -165,8 +181,13 @@ class RankFM():
         likelihood = sum(np.log(1 / (1 + np.exp(-self._pairwise_utility(sample)))) for sample in samples)
         penalty = sum([np.sum(self.regularization * np.square(w)) for w in [self.w_item, self.v_user, self.v_item]])
         return likelihood - penalty
-
-
+    
+    
+    # -------------------------------
+    # begin public method definitions
+    # -------------------------------
+    
+    
     def fit(self, interactions, epochs=1, verbose=False):
         """train model weights using the interaction data
 
@@ -194,36 +215,74 @@ class RankFM():
                 print("\ntraining epoch: {}".format(epoch))
                 print("penalized log-likelihood: {}".format(round(ll, 2)))
 
-        # return a reference to the trained model object for chained method calls
+        # set internal model state to fitted and return object reference for chained method calls
+        self.is_fit = True
         return self
 
 
-    def predict(self, interactions):
+    def predict(self, interactions, cold_start='nan'):
         """calculate the predicted pointwise utilities for all (user, item) pairs
 
         :param interactions: pandas dataframe of user/item pairs for which to generate utility scores
-        :return: vector of utility scores corresponding to input user/item pairs
+        :param cold_start: whether to generate missing values ('nan') or drop ('drop') user/item pairs not found in training data
+        :return: vector of real-valued model scores  
         """
+        
+        # ensure that the model has been fit before attempting to generate predictions
+        assert self.is_fit, "you must fit the model prior to generating predictions"
+        
+        # map raw user/item identifiers to internal index positions
+        pred_interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
+        pred_interactions['user_id'] = pred_interactions['user_id'].map(self.user_to_index)
+        pred_interactions['item_id'] = pred_interactions['item_id'].map(self.item_to_index)
+        pred_interactions = pred_interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1)
+        
+        # generate model scores for user/item pairs found in training data and np.nan otherwise
+        pairs = zip(pred_interactions['user_idx'], pred_interactions['item_idx'])
+        scores = np.array([self._pointwise_utility(int(user), int(item)) if not (np.isnan(user) or np.isnan(item)) else np.nan for user, item in pairs])
+        
+        if cold_start == 'nan':
+            return scores
+        elif cold_start == 'drop':
+            return scores[~np.isnan(scores)]
+        else:
+            raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
+            
+        
 
-        user_idx = interactions.iloc[:, 0].map(self.user_to_index)
-        item_idx = interactions.iloc[:, 1].map(self.item_to_index)
-
-        scores = np.array([self._pointwise_utility(user, item) for user, item in zip(user_idx, item_idx)])
-        return scores
-
-
-    def recommend_for_users(self, users, n_items=10):
+    def recommend_for_users(self, users, n_items=10, filter_previous=False, cold_start='nan'):
         """calculate the topN items for each user
 
-        :param users: list of user identifiers for which to generate recommendations
+        :param users: list-like of user identifiers for which to generate recommendations
         :param n_items: number of recommended items to generate for each user
+        :param filter_previous: remove observed training items from generated recommendations
+        :param cold_start: whether to generate missing values ('nan') or drop ('drop') users not found in training data
         :return: pandas dataframe where the index values are user identifiers and the columns are recommended items
         """
+        
+        # ensure that the model has been fit before attempting to generate predictions
+        assert self.is_fit, "you must fit the model prior to generating recommendations"
+        
+        def rec_for_user(user_idx):
+            """subroutine to recommend for a single user index"""
+            
+            if np.isnan(user_idx):
+                return np.full(n_items, np.nan)
+            else:
+                recs = pd.Series(self._pointwise_utilities(int(user_idx)))
+                if filter_previous:
+                    recs = recs[~recs.isin(self.user_items[int(user_idx)])]
+                return recs.sort_values(ascending=False)[:n_items].index.values
+                
+        # generate topN recommended items for all users present in the training data and np.nan otherwise
+        user_idx = pd.Series(users).map(self.user_to_index)
+        top_n = pd.DataFrame([rec_for_user(user) for user in user_idx], index=users).apply(lambda c: c.map(self.index_to_item))
+        
+        if cold_start == 'nan':
+            return top_n
+        elif cold_start == 'drop':
+            return top_n.dropna(how='any')
+        else:
+            raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
 
-        user_idx = pd.Series(users).map(self.user_to_index).dropna().astype('int32')
-        user_ids = user_idx.map(self.index_to_user)
-
-        top_n = [pd.Series(self._pointwise_utilities(user)).sort_values(ascending=False)[:n_items].index.values for user in user_idx]
-        top_n = pd.DataFrame(top_n, index=user_ids).apply(lambda c: c.map(self.index_to_item))
-        return top_n
 
