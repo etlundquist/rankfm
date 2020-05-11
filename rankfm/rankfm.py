@@ -178,7 +178,7 @@ class RankFM():
         :return: current penalized log-likelihood (scalar)
         """
 
-        likelihood = sum(np.log(1 / (1 + np.exp(-self._pairwise_utility(sample)))) for sample in samples)
+        likelihood = sum([np.log(1 / (1 + np.exp(-self._pairwise_utility(sample)))) for sample in samples])
         penalty = sum([np.sum(self.regularization * np.square(w)) for w in [self.w_item, self.v_user, self.v_item]])
         return likelihood - penalty
     
