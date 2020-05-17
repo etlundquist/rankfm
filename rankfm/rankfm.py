@@ -47,18 +47,18 @@ class RankFM():
         self.item_idx = None
 
         # number of unique users/items
-        self.n_users = None
-        self.n_items = None
+        self.n_u = None
+        self.n_i = None
 
         # model scalar weights
-        self.w_item = None
-        self.w_item_features = None
+        self.w_i = None
+        self.w_if = None
 
         # model latent factors
-        self.v_user = None
-        self.v_item = None
-        self.v_user_features = None
-        self.v_item_features = None
+        self.v_u = None
+        self.v_i = None
+        self.v_uf = None
+        self.v_if = None
 
         # internal state info
         self.is_fit = False
@@ -104,40 +104,40 @@ class RankFM():
         self.user_items = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
 
         # store the total cardinality of users/items
-        self.n_users = len(self.user_idx)
-        self.n_items = len(self.item_idx)
+        self.n_u = len(self.user_idx)
+        self.n_i = len(self.item_idx)
 
         # store user features internally as a ndarray [UxP] row-ordered by user index position
         if user_features:
-            self.user_features = pd.DataFrame(user_features.copy())
-            self.user_features = self.user_features.set_index(self.user_features.columns[0]).astype(np.float32)
-            self.user_features.index = self.user_features.index.map(self.user_to_index)
-            self.user_features = self.user_features.sort_index().to_numpy()
+            self.x_uf = pd.DataFrame(user_features.copy())
+            self.x_uf = self.x_uf.set_index(self.x_uf.columns[0]).astype(np.float32)
+            self.x_uf.index = self.x_uf.index.map(self.user_to_index)
+            self.x_uf = self.x_uf.sort_index().to_numpy()
         else:
-            self.user_features = np.zeros((self.n_users, 1))
+            self.x_uf = np.zeros((self.n_u, 1))
 
         # store item features internally as a ndarray [IxQ] row-ordered by item index position
         if item_features:
-            self.item_features = pd.DataFrame(item_features.copy())
-            self.item_features = self.item_features.set_index(self.item_features.columns[0]).astype(np.float32)
-            self.item_features.index = self.item_features.index.map(self.item_to_index)
-            self.item_features = self.item_features.sort_index().to_numpy()
+            self.x_if = pd.DataFrame(item_features.copy())
+            self.x_if = self.x_if.set_index(self.x_if.columns[0]).astype(np.float32)
+            self.x_if.index = self.x_if.index.map(self.item_to_index)
+            self.x_if = self.x_if.sort_index().to_numpy()
         else:
-            self.item_features = np.zeros((self.n_items, 1))
+            self.x_if = np.zeros((self.n_i, 1))
 
         # record the number of user/item features
-        self.n_user_features = self.user_features.shape[1]
-        self.n_item_features = self.item_features.shape[1]
+        self.n_uf = self.x_uf.shape[1]
+        self.n_if = self.x_if.shape[1]
 
         # initialize the scalar weights as ndarrays of zeros
-        self.w_item = np.zeros(self.n_items)
-        self.w_item_features = np.zeros(self.n_item_features)
+        self.w_i = np.zeros(self.n_i)
+        self.w_if = np.zeros(self.n_if)
 
         # initialize the latent factors by drawing random samples from a normal distribution
-        self.v_user = np.random.normal(loc=0, scale=self.sigma, size=(self.n_users, self.factors))
-        self.v_item = np.random.normal(loc=0, scale=self.sigma, size=(self.n_items, self.factors))
-        self.v_user_features = np.random.normal(loc=0, scale=self.sigma, size=(self.n_user_features, self.factors))
-        self.v_item_features = np.random.normal(loc=0, scale=self.sigma, size=(self.n_item_features, self.factors))
+        self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(self.n_u, self.factors))
+        self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(self.n_i, self.factors))
+        self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=(self.n_uf, self.factors))
+        self.v_if = np.random.normal(loc=0, scale=self.sigma, size=(self.n_if, self.factors))
 
 
     def _pointwise_utility(self, u, i):
@@ -148,13 +148,14 @@ class RankFM():
         :return: scalar utility
         """
 
-        item = self.w_item[i]
-        item_features = np.dot(self.item_features[i], self.w_item_features)
-        item_user = np.dot(self.v_item[i], self.v_user[u])
-        user_item_features = np.dot(self.item_features[i], np.dot(self.v_item_features, self.v_user[u]))
-        item_user_features = np.dot(self.user_features[u], np.dot(self.v_user_features, self.v_item[i]))
+        item = self.w_i[i]
+        item_features = np.dot(self.x_if[i], self.w_if)
+        item_user = np.dot(self.v_i[i], self.v_u[u])
+        user_item_features = np.dot(self.x_if[i], np.dot(self.v_if, self.v_u[u]))
+        item_user_features = np.dot(self.x_uf[u], np.dot(self.v_uf, self.v_i[i]))
+        feature_interactions = np.dot(np.dot(self.v_uf.T, self.x_uf[u]), np.dot(self.v_if.T, self.x_if[i]))
 
-        utility = item + item_features + item_user + user_item_features + item_user_features
+        utility = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
         return utility
 
 
@@ -165,13 +166,14 @@ class RankFM():
         :return: vector of predicted utilities for all items by index position
         """
 
-        item = self.w_item
-        item_features = np.dot(self.item_features, self.w_item_features)
-        item_user = np.dot(self.v_item, self.v_user[u])
-        user_item_features = np.dot(self.item_features, np.dot(self.v_item_features, self.v_user[u]))
-        item_user_features = np.dot(np.dot(self.v_user_features, self.v_item.T).T, self.user_features[u])
+        item = self.w_i
+        item_features = np.dot(self.x_if, self.w_if)
+        item_user = np.dot(self.v_i, self.v_u[u])
+        user_item_features = np.dot(self.x_if, np.dot(self.v_if, self.v_u[u]))
+        item_user_features = np.dot(np.dot(self.v_uf, self.v_i.T).T, self.x_uf[u])
+        feature_interactions = np.dot(np.dot(self.x_if, self.v_if), np.dot(self.v_uf.T, self.x_uf[u]))
 
-        utilities = item + item_features + item_user + user_item_features + item_user_features
+        utilities = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
         return utilities
 
 
@@ -184,52 +186,68 @@ class RankFM():
         :return: pairwise utility score: utility(u, i) - utility(u, j)
         """
 
-        item = self.w_item[i] - self.w_item[j]
-        item_features = np.dot(self.item_features[i] - self.item_features[j], self.w_item_features)
-        item_user = np.dot(self.v_item[i] - self.v_item[j], self.v_user[u])
-        user_item_features = np.dot(self.item_features[i] - self.item_features[j], np.dot(self.v_item_features, self.v_user[u]))
-        item_user_features = np.dot(self.user_features[u], np.dot(self.v_user_features, self.v_item[i] - self.v_item[j]))
+        item = self.w_i[i] - self.w_i[j]
+        item_features = np.dot(self.x_if[i] - self.x_if[j], self.w_if)
+        item_user = np.dot(self.v_i[i] - self.v_i[j], self.v_u[u])
+        user_item_features = np.dot(self.x_if[i] - self.x_if[j], np.dot(self.v_if, self.v_u[u]))
+        item_user_features = np.dot(self.x_uf[u], np.dot(self.v_uf, self.v_i[i] - self.v_i[j]))
+        feature_interactions = np.dot(np.dot(self.v_uf.T, self.x_uf[u]), np.dot(self.v_if.T, self.x_if[i] - self.x_if[j]))
 
-        utility = item + item_features + item_user + user_item_features + item_user_features
+        utility = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
         return utility
-
-
-
-
-
-
-
-
-
 
 
     def _gradient_step(self, u, i, j):
         """update current model weights based on the gradient of the log-likelihood function
 
-        :param sample: (u, i, j) index position tuple
+        :param u: user index
+        :param i: observed item index
+        :param j: unobserved item index
         :return: None
         """
 
         # calculate the pairwise utility of the (u, i, j) pair
         utility = self._pairwise_utility(u, i, j)
 
-        # calculate the outer derivative [d_LL/d_g(theta)] and the regularization derivative [d_pen/d_theta]
-        d_con = (1 / (1 + np.exp(utility)))
-        d_pen = 2 * self.regularization
+        # calculate the outer derivative [d_LL/d_g(theta)] and the regularization derivative [d_reg/d_theta]
+        d_con = 1.0 / (np.exp(utility) + 1.0)
+        d_reg = 2.0 * self.regularization
 
-        # calculate the inner derivatives [d_g(theta)/d_theta]
-        d_w_i = 1
-        d_w_j = -1
-        d_v_u = self.v_item[i] - self.v_item[j]
-        d_v_i = self.v_user[u]
-        d_v_j = -self.v_user[u]
+        # [scalar weights (1)] calculate the inner derivatives [d_g(theta)/d_theta]
+        d_w_i = 1.0
+        d_w_j = -1.0
+        d_w_if = self.x_if[i] - self.x_if[j]
+
+        # [user/item (Fx1) factors] calculate the inner derivatives [d_g(theta)/d_theta]
+        d_v_u = self.v_i[i] - self.v_i[j] + np.dot(self.v_if.T, self.x_if[i] - self.x_if[j])
+        d_v_i = self.v_u[u] + np.dot(self.v_uf.T, self.x_uf[u])
+        d_v_j = -self.v_u[u] - np.dot(self.v_uf.T, self.x_uf[u])
+
+        # [user (PxF) and item (QxF) feature factors] calculate the inner derivatives [d_g(theta)/d_theta]
+        # NOTE: these nested for loops should be nearly as fast as the matrix multiplication form in the optimized code
+
+        P = len(self.x_uf[u])
+        Q = len(self.x_if[i])
+        F = len(self.v_i[i])
+
+        d_v_uf = np.empty([P, F])
+        d_v_if = np.empty([Q, F])
+
+        for f in range(F):
+            for p in range(P):
+                d_v_uf[p, f] = (self.x_uf[u][p]) * (self.v_i[i][f] - self.v_i[j][f] + np.dot(self.v_if.T[f], self.x_if[i] - self.x_if[j]))
+            for q in range(Q):
+                d_v_if[q, f] = (self.x_if[i][q] - self.x_if[j][q]) * (self.v_u[u][f] + np.dot(self.v_uf.T[f], self.x_uf[u]))
 
         # perform the gradient updates to the relevant model weights
-        self.w_item[i] += self.learning_rate * ((d_con * d_w_i) - (d_pen * self.w_item[i]))
-        self.w_item[j] += self.learning_rate * ((d_con * d_w_j) - (d_pen * self.w_item[j]))
-        self.v_user[u] += self.learning_rate * ((d_con * d_v_u) - (d_pen * self.v_user[u]))
-        self.v_item[i] += self.learning_rate * ((d_con * d_v_i) - (d_pen * self.v_item[i]))
-        self.v_item[j] += self.learning_rate * ((d_con * d_v_j) - (d_pen * self.v_item[j]))
+        self.w_i[i] += self.learning_rate * ((d_con * d_w_i)  - (d_reg * self.w_i[i]))
+        self.w_i[j] += self.learning_rate * ((d_con * d_w_j)  - (d_reg * self.w_i[j]))
+        self.w_if   += self.learning_rate * ((d_con * d_w_if) - (d_reg * self.w_if))
+        self.v_u[u] += self.learning_rate * ((d_con * d_v_u)  - (d_reg * self.v_u[u]))
+        self.v_i[i] += self.learning_rate * ((d_con * d_v_i)  - (d_reg * self.v_i[i]))
+        self.v_i[j] += self.learning_rate * ((d_con * d_v_j)  - (d_reg * self.v_i[j]))
+        self.v_uf   += self.learning_rate * ((d_con * d_v_uf) - (d_reg * self.v_uf))
+        self.v_if   += self.learning_rate * ((d_con * d_v_if) - (d_reg * self.v_if))
 
 
     def _log_likelihood(self, samples):
@@ -240,7 +258,7 @@ class RankFM():
         """
 
         likelihood = sum([np.log(1 / (1 + np.exp(-self._pairwise_utility(u, i, j)))) for u, i, j in samples])
-        penalty = sum([np.sum(self.regularization * np.square(w)) for w in [self.w_item, self.v_user, self.v_item]])
+        penalty = sum([np.sum(self.regularization * np.square(w)) for w in [self.w_i, self.w_if, self.v_u, self.v_i, self.v_uf, self.v_if]])
         return likelihood - penalty
 
 
