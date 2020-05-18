@@ -24,52 +24,59 @@ class RankFM():
         :return: None
         """
 
-        # model hyperparameters
+        # store hyperparameters
         self.factors = factors
         self.learning_rate = learning_rate
         self.regularization = regularization
         self.sigma = sigma
 
-        # user/item identifiers <--> index positions mappings
-        self.index_to_user = None
-        self.index_to_item = None
-        self.user_to_index = None
-        self.item_to_index = None
+        # set/clear initial model state
+        self._reset_state()
 
-        # internal raw interactions data and user:items mapping
+
+    # -------------------------------------------
+    # begin private initializing/indexing methods
+    # -------------------------------------------
+
+
+    def _reset_state(self):
+        """initialize/reset all user/item/feature indexes and model weights"""
+
+        # user/item interactions
         self.interactions = None
         self.user_items = None
 
-        # unique lists of all users/items
+        # user/item features
+        self.x_uf = None
+        self.x_if = None
+
+        # user/item ID/INDEX arrays
         self.user_id = None
         self.item_id = None
         self.user_idx = None
         self.item_idx = None
 
-        # number of unique users/items
-        self.n_u = None
-        self.n_i = None
+        # user/item ID <--> INDEX mappings
+        self.index_to_user = None
+        self.index_to_item = None
+        self.user_to_index = None
+        self.item_to_index = None
 
-        # model scalar weights
+        # item and item feature weights
         self.w_i = None
         self.w_if = None
 
-        # model latent factors
+        # user/item/user-feature/item-feature latent factors
         self.v_u = None
         self.v_i = None
         self.v_uf = None
         self.v_if = None
 
-        # internal state info
+        # internal model state
         self.is_fit = False
 
 
-    # --------------------------------
-    # begin private method definitions
-    # --------------------------------
-
-
-    def _index(self, interactions, user_features=None, item_features=None):
+    def _init_all(self, interactions, user_features=None, item_features=None):
         """index the raw interaction and user/item features data to numpy arrays
 
         :param interactions: pandas dataframe of observed user/item interactions
@@ -78,12 +85,10 @@ class RankFM():
         :return: None
         """
 
-        # copy the raw interactions data into a pandas dataframe for internal use
-        self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
-
         # save the unique lists of users/items in terms of original identifiers
-        self.user_id = pd.Series(np.sort(np.unique(self.interactions['user_id'])))
-        self.item_id = pd.Series(np.sort(np.unique(self.interactions['item_id'])))
+        interactions_df =  pd.DataFrame(interactions, columns=['user_id', 'item_id'])
+        self.user_id = pd.Series(np.sort(np.unique(interactions_df['user_id'])))
+        self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
         # create zero-based index position to identifier mappings
         self.index_to_user = self.user_id.to_dict()
@@ -93,51 +98,80 @@ class RankFM():
         self.user_to_index = {val: key for key, val in self.index_to_user.items()}
         self.item_to_index = {val: key for key, val in self.index_to_item.items()}
 
-        # convert the internal interactions data from identifiers to index positions
-        self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index)
-        self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index)
-        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).astype(np.int32)
-
         # store unique values of user/item indexes and observed interactions for each user
         self.user_idx = np.sort(self.index_to_user.keys())
         self.item_idx = np.sort(self.index_to_item.keys())
-        self.user_items = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
 
-        # store the total cardinality of users/items
-        self.n_u = len(self.user_idx)
-        self.n_i = len(self.item_idx)
+        # map the interactions to internal index positions
+        self._init_interactions(interactions)
 
-        # store user features internally as a ndarray [UxP] row-ordered by user index position
+        # map the user/item features to internal index positions
+        self._init_features(user_features, item_features)
+
+        # initialize the model weights after the user/item/feature dimensions have been established
+        self._init_weights()
+
+
+    def _init_interactions(self, interactions):
+        """map new interaction data to existing internal user/item indexes
+
+        :param interactions: pandas dataframe of observed user/item interactions
+        :return: None
+        """
+
+        # NOTE: any user/item ID pairs not found in the existing index will be dropped
+        self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
+        self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index)
+        self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index)
+        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna(how='any').astype(np.int32)
+        self.user_items   = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
+
+
+    def _init_features(self, user_features=None, item_features=None):
+        """initialize the user/item features given existing internal user/item indexes"""
+
+        # store the user features as a ndarray [UxP] row-ordered by user index position
         if user_features:
-            self.x_uf = pd.DataFrame(user_features.copy())
-            self.x_uf = self.x_uf.set_index(self.x_uf.columns[0]).astype(np.float32)
-            self.x_uf.index = self.x_uf.index.map(self.user_to_index)
-            self.x_uf = self.x_uf.sort_index().to_numpy()
+            x_uf = pd.DataFrame(user_features.copy())
+            x_uf = x_uf.set_index(x_uf.columns[0]).astype(np.float32)
+            x_uf.index = x_uf.index.map(self.user_to_index)
+            if np.array_equal(sorted(x_uf.index.values), self.user_idx):
+                self.x_uf = x_uf.sort_index().to_numpy()
+            else:
+                raise KeyError('the users in [user_features] do not match the users in [interactions]')
         else:
-            self.x_uf = np.zeros((self.n_u, 1))
+            self.x_uf = np.zeros([len(self.user_idx), 1])
 
-        # store item features internally as a ndarray [IxQ] row-ordered by item index position
+        # store the item features as a ndarray [IxQ] row-ordered by item index position
         if item_features:
-            self.x_if = pd.DataFrame(item_features.copy())
-            self.x_if = self.x_if.set_index(self.x_if.columns[0]).astype(np.float32)
-            self.x_if.index = self.x_if.index.map(self.item_to_index)
-            self.x_if = self.x_if.sort_index().to_numpy()
+            x_if = pd.DataFrame(item_features.copy())
+            x_if = x_if.set_index(x_if.columns[0]).astype(np.float32)
+            x_if.index = x_if.index.map(self.item_to_index)
+            if np.array_equal(sorted(x_if.index.values), self.item_idx):
+                self.x_if = x_if.sort_index().to_numpy()
+            else:
+                raise KeyError('the items in [item_features] do not match the items in [interactions]')
         else:
-            self.x_if = np.zeros((self.n_i, 1))
+            self.x_if = np.zeros([len(self.item_idx), 1])
 
-        # record the number of user/item features
-        self.n_uf = self.x_uf.shape[1]
-        self.n_if = self.x_if.shape[1]
 
-        # initialize the scalar weights as ndarrays of zeros
-        self.w_i = np.zeros(self.n_i)
-        self.w_if = np.zeros(self.n_if)
+    def _init_weights(self):
+        """initialize model weights given defined user/item and user_feature/item_feature indexes/shapes"""
 
-        # initialize the latent factors by drawing random samples from a normal distribution
-        self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(self.n_u, self.factors))
-        self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(self.n_i, self.factors))
-        self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=(self.n_uf, self.factors))
-        self.v_if = np.random.normal(loc=0, scale=self.sigma, size=(self.n_if, self.factors))
+        # initialize scalar weights as ndarrays of zeros
+        self.w_i = np.zeros(len(self.item_idx))
+        self.w_if = np.zeros(self.x_if.shape[1])
+
+        # initialize latent factors by drawing random samples from a normal distribution
+        self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(len(self.user_idx), self.factors))
+        self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(len(self.item_idx), self.factors))
+        self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=(self.x_uf.shape[1], self.factors))
+        self.v_if = np.random.normal(loc=0, scale=self.sigma, size=(self.x_if.shape[1], self.factors))
+
+
+    # -----------------------------------
+    # begin private model-fitting methods
+    # -----------------------------------
 
 
     def _pointwise_utility(self, u, i):
@@ -262,13 +296,13 @@ class RankFM():
         return likelihood - penalty
 
 
-    # -------------------------------
-    # begin public method definitions
-    # -------------------------------
+    # --------------------
+    # begin public methods
+    # --------------------
 
 
     def fit(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
-        """train model weights using the interaction data
+        """clear previous model state and learn new model weights using the input data
 
         :param interactions: pandas dataframe of observed user/item interactions
         :param user_features: pandas dataframe of additional features for each user
@@ -278,9 +312,26 @@ class RankFM():
         :return: self
         """
 
-        # copy the raw interaction data into an internal pandas dataframe
-        # and map original user/item identifers to zero-based index positions
-        self._index(interactions, user_features, item_features)
+        self._reset_state()
+        self.fit_partial(interactions, user_features, item_features, epochs, verbose)
+
+
+    def fit_partial(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
+        """learn or update model weights using the input data and resuming from the current model state
+
+        :param interactions: pandas dataframe of observed user/item interactions
+        :param user_features: pandas dataframe of additional features for each user
+        :param item_features: pandas dataframe of additional features for each item
+        :param epochs: number of training epochs (full passes through observed interactions)
+        :param verbose: whether to print epoch number and log-likelihood during training
+        :return: self
+        """
+
+        if self.is_fit:
+            self._init_interactions(interactions)
+            self._init_features(user_features, item_features)
+        else:
+            self._init_all(interactions, user_features, item_features)
 
         for epoch in range(epochs):
 
@@ -296,7 +347,6 @@ class RankFM():
                 print("\ntraining epoch: {}".format(epoch))
                 print("penalized log-likelihood: {}".format(round(ll, 2)))
 
-        # set internal model state to fitted and return object reference for chained method calls
         self.is_fit = True
         return self
 
