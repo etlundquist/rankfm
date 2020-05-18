@@ -40,7 +40,7 @@ class RankFM():
 
 
     def _reset_state(self):
-        """initialize/reset all user/item/feature indexes and model weights"""
+        """initialize/reset all [user/item/feature] indexes and model weights"""
 
         # user/item interactions
         self.interactions = None
@@ -79,9 +79,9 @@ class RankFM():
     def _init_all(self, interactions, user_features=None, item_features=None):
         """index the raw interaction and user/item features data to numpy arrays
 
-        :param interactions: pandas dataframe of observed user/item interactions
-        :param user_features: optional pandas dataframe of additional features for each user
-        :param item_features: optional pandas dataframe of additional features for each item
+        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
         :return: None
         """
 
@@ -91,16 +91,16 @@ class RankFM():
         self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
         # create zero-based index position to identifier mappings
-        self.index_to_user = self.user_id.to_dict()
-        self.index_to_item = self.item_id.to_dict()
+        self.index_to_user = self.user_id
+        self.index_to_item = self.item_id
 
         # create reverse mappings from identifiers to zero-based index positions
-        self.user_to_index = {val: key for key, val in self.index_to_user.items()}
-        self.item_to_index = {val: key for key, val in self.index_to_item.items()}
+        self.user_to_index = pd.Series(data=self.index_to_user.index, index=self.index_to_user.values)
+        self.item_to_index = pd.Series(data=self.index_to_item.index, index=self.index_to_item.values)
 
         # store unique values of user/item indexes and observed interactions for each user
-        self.user_idx = np.sort(self.index_to_user.keys())
-        self.item_idx = np.sort(self.index_to_item.keys())
+        self.user_idx = np.arange(len(self.user_id))
+        self.item_idx = np.arange(len(self.item_id))
 
         # map the interactions to internal index positions
         self._init_interactions(interactions)
@@ -109,13 +109,13 @@ class RankFM():
         self._init_features(user_features, item_features)
 
         # initialize the model weights after the user/item/feature dimensions have been established
-        self._init_weights()
+        self._init_weights(user_features, item_features)
 
 
     def _init_interactions(self, interactions):
         """map new interaction data to existing internal user/item indexes
 
-        :param interactions: pandas dataframe of observed user/item interactions
+        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :return: None
         """
 
@@ -128,10 +128,15 @@ class RankFM():
 
 
     def _init_features(self, user_features=None, item_features=None):
-        """initialize the user/item features given existing internal user/item indexes"""
+        """initialize the user/item features given existing internal user/item indexes
+
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :return: None
+        """
 
         # store the user features as a ndarray [UxP] row-ordered by user index position
-        if user_features:
+        if user_features is not None:
             x_uf = pd.DataFrame(user_features.copy())
             x_uf = x_uf.set_index(x_uf.columns[0]).astype(np.float32)
             x_uf.index = x_uf.index.map(self.user_to_index)
@@ -143,7 +148,7 @@ class RankFM():
             self.x_uf = np.zeros([len(self.user_idx), 1])
 
         # store the item features as a ndarray [IxQ] row-ordered by item index position
-        if item_features:
+        if item_features is not None:
             x_if = pd.DataFrame(item_features.copy())
             x_if = x_if.set_index(x_if.columns[0]).astype(np.float32)
             x_if.index = x_if.index.map(self.item_to_index)
@@ -155,8 +160,8 @@ class RankFM():
             self.x_if = np.zeros([len(self.item_idx), 1])
 
 
-    def _init_weights(self):
-        """initialize model weights given defined user/item and user_feature/item_feature indexes/shapes"""
+    def _init_weights(self, user_features, item_features):
+        """initialize model weights given user/item and user_feature/item_feature indexes/shapes"""
 
         # initialize scalar weights as ndarrays of zeros
         self.w_i = np.zeros(len(self.item_idx))
@@ -165,8 +170,20 @@ class RankFM():
         # initialize latent factors by drawing random samples from a normal distribution
         self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(len(self.user_idx), self.factors))
         self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(len(self.item_idx), self.factors))
-        self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=(self.x_uf.shape[1], self.factors))
-        self.v_if = np.random.normal(loc=0, scale=self.sigma, size=(self.x_if.shape[1], self.factors))
+
+        # randomly initialize user feature factors if user features were supplied
+        # NOTE: set all user feature factor weights to zero to prevent random scoring influence otherwise
+        if user_features is None:
+            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors])
+        else:
+            self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors])
+
+        # randomly initialize item feature factors if item features were supplied
+        # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
+        if item_features is None:
+            self.v_if = np.zeros([self.x_if.shape[1], self.factors])
+        else:
+            self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors])
 
 
     # -----------------------------------
@@ -179,7 +196,7 @@ class RankFM():
 
         :param u: user index
         :param i: item index
-        :return: scalar utility
+        :return: scalar predicted utility value
         """
 
         item = self.w_i[i]
@@ -197,7 +214,7 @@ class RankFM():
         """calculate the pointwise utilities of all items for a given user
 
         :param u: user index
-        :return: vector of predicted utilities for all items by index position
+        :return: vector of predicted utilities for all items
         """
 
         item = self.w_i
@@ -217,7 +234,7 @@ class RankFM():
         :param u: user index
         :param i: observed item index
         :param j: unobserved item index
-        :return: pairwise utility score: utility(u, i) - utility(u, j)
+        :return: pairwise utility = pointwise_utility(u, i) - pointwise_utility(u, j)
         """
 
         item = self.w_i[i] - self.w_i[j]
@@ -269,9 +286,15 @@ class RankFM():
 
         for f in range(F):
             for p in range(P):
-                d_v_uf[p, f] = (self.x_uf[u][p]) * (self.v_i[i][f] - self.v_i[j][f] + np.dot(self.v_if.T[f], self.x_if[i] - self.x_if[j]))
+                if (self.x_uf[u][p]) == 0.0:
+                    d_v_uf[p, f] = 0.0
+                else:
+                    d_v_uf[p, f] = (self.x_uf[u][p]) * (self.v_i[i][f] - self.v_i[j][f] + np.dot(self.v_if.T[f], self.x_if[i] - self.x_if[j]))
             for q in range(Q):
-                d_v_if[q, f] = (self.x_if[i][q] - self.x_if[j][q]) * (self.v_u[u][f] + np.dot(self.v_uf.T[f], self.x_uf[u]))
+                if (self.x_if[i][q] - self.x_if[j][q]) == 0.0:
+                    d_v_if[q, f] = 0.0
+                else:
+                    d_v_if[q, f] = (self.x_if[i][q] - self.x_if[j][q]) * (self.v_u[u][f] + np.dot(self.v_uf.T[f], self.x_uf[u]))
 
         # perform the gradient updates to the relevant model weights
         self.w_i[i] += self.learning_rate * ((d_con * d_w_i)  - (d_reg * self.w_i[i]))
@@ -304,9 +327,9 @@ class RankFM():
     def fit(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
         """clear previous model state and learn new model weights using the input data
 
-        :param interactions: pandas dataframe of observed user/item interactions
-        :param user_features: pandas dataframe of additional features for each user
-        :param item_features: pandas dataframe of additional features for each item
+        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
@@ -319,9 +342,9 @@ class RankFM():
     def fit_partial(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
         """learn or update model weights using the input data and resuming from the current model state
 
-        :param interactions: pandas dataframe of observed user/item interactions
-        :param user_features: pandas dataframe of additional features for each user
-        :param item_features: pandas dataframe of additional features for each item
+        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
@@ -354,7 +377,7 @@ class RankFM():
     def predict(self, interactions, cold_start='nan'):
         """calculate the predicted pointwise utilities for all (user, item) pairs
 
-        :param interactions: pandas dataframe of user/item pairs for which to generate utility scores
+        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :param cold_start: whether to generate missing values ('nan') or drop ('drop') user/item pairs not found in training data
         :return: vector of real-valued model scores
         """
