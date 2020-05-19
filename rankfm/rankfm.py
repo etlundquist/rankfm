@@ -42,14 +42,6 @@ class RankFM():
     def _reset_state(self):
         """initialize/reset all [user/item/feature] indexes and model weights"""
 
-        # user/item interactions
-        self.interactions = None
-        self.user_items = None
-
-        # user/item features
-        self.x_uf = None
-        self.x_if = None
-
         # user/item ID/INDEX arrays
         self.user_id = None
         self.item_id = None
@@ -61,6 +53,14 @@ class RankFM():
         self.index_to_item = None
         self.user_to_index = None
         self.item_to_index = None
+
+        # user/item interactions
+        self.interactions = None
+        self.user_items = None
+
+        # user/item features
+        self.x_uf = None
+        self.x_if = None
 
         # item and item feature weights
         self.w_i = None
