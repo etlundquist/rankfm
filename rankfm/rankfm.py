@@ -4,11 +4,13 @@ rankfm main modeling class
 
 import os
 import sys
+import warnings
 
 import numpy as np
 import pandas as pd
+import numba as nb
 
-from utils import sample_tuples
+warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
 class RankFM():
@@ -56,7 +58,8 @@ class RankFM():
 
         # user/item interactions
         self.interactions = None
-        self.user_items = None
+        self.user_items_py = None
+        self.user_items_nb = None
 
         # user/item features
         self.x_uf = None
@@ -99,8 +102,8 @@ class RankFM():
         self.item_to_index = pd.Series(data=self.index_to_item.index, index=self.index_to_item.values)
 
         # store unique values of user/item indexes and observed interactions for each user
-        self.user_idx = np.arange(len(self.user_id))
-        self.item_idx = np.arange(len(self.item_id))
+        self.user_idx = np.arange(len(self.user_id), dtype=np.int32)
+        self.item_idx = np.arange(len(self.item_id), dtype=np.int32)
 
         # map the interactions to internal index positions
         self._init_interactions(interactions)
@@ -119,12 +122,24 @@ class RankFM():
         :return: None
         """
 
-        # NOTE: any user/item ID pairs not found in the existing index will be dropped
+        # map the raw user/item identifiers to internal zero-based index positions
+        # NOTE: any user/item pairs not found in the existing indexes will be dropped
+
         self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
-        self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index)
-        self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index)
-        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna(how='any').astype(np.int32)
-        self.user_items   = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index).astype(np.int32)
+        self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index).astype(np.int32)
+        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna().astype(np.int32)
+
+        # create python/numba lookup dictionaries containing the set of observed items for each user
+        # NOTE: the typed numba dictionary will be used to sample unobserved items during training
+        # NOTE: the interactions data must be converted to np.ndarray prior to training to use @njit
+
+        self.user_items_nb = nb.typed.Dict.empty(key_type=nb.types.int32, value_type=nb.types.int32[:])
+        self.user_items_py = self.interactions.groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
+        self.interactions = self.interactions.to_numpy()
+
+        for user, items in self.user_items_py.items():
+            self.user_items_nb[user] = items
 
 
     def _init_features(self, user_features=None, item_features=None):
@@ -138,52 +153,52 @@ class RankFM():
         # store the user features as a ndarray [UxP] row-ordered by user index position
         if user_features is not None:
             x_uf = pd.DataFrame(user_features.copy())
-            x_uf = x_uf.set_index(x_uf.columns[0]).astype(np.float32)
+            x_uf = x_uf.set_index(x_uf.columns[0])
             x_uf.index = x_uf.index.map(self.user_to_index)
             if np.array_equal(sorted(x_uf.index.values), self.user_idx):
-                self.x_uf = x_uf.sort_index().to_numpy()
+                self.x_uf = np.array(x_uf.sort_index(), dtype=np.float32, order='C')
             else:
                 raise KeyError('the users in [user_features] do not match the users in [interactions]')
         else:
-            self.x_uf = np.zeros([len(self.user_idx), 1])
+            self.x_uf = np.zeros([len(self.user_idx), 1]).astype(np.float32)
 
         # store the item features as a ndarray [IxQ] row-ordered by item index position
         if item_features is not None:
             x_if = pd.DataFrame(item_features.copy())
-            x_if = x_if.set_index(x_if.columns[0]).astype(np.float32)
+            x_if = x_if.set_index(x_if.columns[0])
             x_if.index = x_if.index.map(self.item_to_index)
             if np.array_equal(sorted(x_if.index.values), self.item_idx):
-                self.x_if = x_if.sort_index().to_numpy()
+                self.x_if = np.array(x_if.sort_index(), dtype=np.float32, order='C')
             else:
                 raise KeyError('the items in [item_features] do not match the items in [interactions]')
         else:
-            self.x_if = np.zeros([len(self.item_idx), 1])
+            self.x_if = np.zeros([len(self.item_idx), 1]).astype(np.float32)
 
 
     def _init_weights(self, user_features, item_features):
         """initialize model weights given user/item and user_feature/item_feature indexes/shapes"""
 
         # initialize scalar weights as ndarrays of zeros
-        self.w_i = np.zeros(len(self.item_idx))
-        self.w_if = np.zeros(self.x_if.shape[1])
+        self.w_i = np.zeros(len(self.item_idx)).astype(np.float32)
+        self.w_if = np.zeros(self.x_if.shape[1]).astype(np.float32)
 
         # initialize latent factors by drawing random samples from a normal distribution
-        self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(len(self.user_idx), self.factors))
-        self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(len(self.item_idx), self.factors))
+        self.v_u = np.random.normal(loc=0, scale=self.sigma, size=(len(self.user_idx), self.factors)).astype(np.float32)
+        self.v_i = np.random.normal(loc=0, scale=self.sigma, size=(len(self.item_idx), self.factors)).astype(np.float32)
 
         # randomly initialize user feature factors if user features were supplied
         # NOTE: set all user feature factor weights to zero to prevent random scoring influence otherwise
         if user_features is None:
-            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors])
+            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors])
+            self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
 
         # randomly initialize item feature factors if item features were supplied
         # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
         if item_features is None:
-            self.v_if = np.zeros([self.x_if.shape[1], self.factors])
+            self.v_if = np.zeros([self.x_if.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors])
+            self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
 
 
     # -----------------------------------
