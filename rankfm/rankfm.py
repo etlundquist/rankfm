@@ -7,10 +7,11 @@ import sys
 import warnings
 
 import numpy as np
-import pandas as pd
 import numba as nb
+import pandas as pd
 
-warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
+from numba_functions import isin, _fit, _predict, _recommend_for_users
+# warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
 class RankFM():
@@ -36,9 +37,9 @@ class RankFM():
         self._reset_state()
 
 
-    # -------------------------------------------
-    # begin private initializing/indexing methods
-    # -------------------------------------------
+    # --------------------------------
+    # begin private method definitions
+    # --------------------------------
 
 
     def _reset_state(self):
@@ -201,142 +202,9 @@ class RankFM():
             self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
 
 
-    # -----------------------------------
-    # begin private model-fitting methods
-    # -----------------------------------
-
-
-    def _pointwise_utility(self, u, i):
-        """calculate the pointwise utility of a given (user, item) pair
-
-        :param u: user index
-        :param i: item index
-        :return: scalar predicted utility value
-        """
-
-        item = self.w_i[i]
-        item_features = np.dot(self.x_if[i], self.w_if)
-        item_user = np.dot(self.v_i[i], self.v_u[u])
-        user_item_features = np.dot(self.x_if[i], np.dot(self.v_if, self.v_u[u]))
-        item_user_features = np.dot(self.x_uf[u], np.dot(self.v_uf, self.v_i[i]))
-        feature_interactions = np.dot(np.dot(self.v_uf.T, self.x_uf[u]), np.dot(self.v_if.T, self.x_if[i]))
-
-        utility = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
-        return utility
-
-
-    def _pointwise_utilities(self, u):
-        """calculate the pointwise utilities of all items for a given user
-
-        :param u: user index
-        :return: vector of predicted utilities for all items
-        """
-
-        item = self.w_i
-        item_features = np.dot(self.x_if, self.w_if)
-        item_user = np.dot(self.v_i, self.v_u[u])
-        user_item_features = np.dot(self.x_if, np.dot(self.v_if, self.v_u[u]))
-        item_user_features = np.dot(np.dot(self.v_uf, self.v_i.T).T, self.x_uf[u])
-        feature_interactions = np.dot(np.dot(self.x_if, self.v_if), np.dot(self.v_uf.T, self.x_uf[u]))
-
-        utilities = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
-        return utilities
-
-
-    def _pairwise_utility(self, u, i, j):
-        """calculate the pairwise utility of an (u, i, j) sample
-
-        :param u: user index
-        :param i: observed item index
-        :param j: unobserved item index
-        :return: pairwise utility = pointwise_utility(u, i) - pointwise_utility(u, j)
-        """
-
-        item = self.w_i[i] - self.w_i[j]
-        item_features = np.dot(self.x_if[i] - self.x_if[j], self.w_if)
-        item_user = np.dot(self.v_i[i] - self.v_i[j], self.v_u[u])
-        user_item_features = np.dot(self.x_if[i] - self.x_if[j], np.dot(self.v_if, self.v_u[u]))
-        item_user_features = np.dot(self.x_uf[u], np.dot(self.v_uf, self.v_i[i] - self.v_i[j]))
-        feature_interactions = np.dot(np.dot(self.v_uf.T, self.x_uf[u]), np.dot(self.v_if.T, self.x_if[i] - self.x_if[j]))
-
-        utility = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
-        return utility
-
-
-    def _gradient_step(self, u, i, j):
-        """update current model weights based on the gradient of the log-likelihood function
-
-        :param u: user index
-        :param i: observed item index
-        :param j: unobserved item index
-        :return: None
-        """
-
-        # calculate the pairwise utility of the (u, i, j) pair
-        utility = self._pairwise_utility(u, i, j)
-
-        # calculate the outer derivative [d_LL/d_g(theta)] and the regularization derivative [d_reg/d_theta]
-        d_con = 1.0 / (np.exp(utility) + 1.0)
-        d_reg = 2.0 * self.regularization
-
-        # [scalar weights (1)] calculate the inner derivatives [d_g(theta)/d_theta]
-        d_w_i = 1.0
-        d_w_j = -1.0
-        d_w_if = self.x_if[i] - self.x_if[j]
-
-        # [user/item (Fx1) factors] calculate the inner derivatives [d_g(theta)/d_theta]
-        d_v_u = self.v_i[i] - self.v_i[j] + np.dot(self.v_if.T, self.x_if[i] - self.x_if[j])
-        d_v_i = self.v_u[u] + np.dot(self.v_uf.T, self.x_uf[u])
-        d_v_j = -self.v_u[u] - np.dot(self.v_uf.T, self.x_uf[u])
-
-        # [user (PxF) and item (QxF) feature factors] calculate the inner derivatives [d_g(theta)/d_theta]
-        # NOTE: these nested for loops should be nearly as fast as the matrix multiplication form in the optimized code
-
-        P = len(self.x_uf[u])
-        Q = len(self.x_if[i])
-        F = len(self.v_i[i])
-
-        d_v_uf = np.empty([P, F])
-        d_v_if = np.empty([Q, F])
-
-        for f in range(F):
-            for p in range(P):
-                if (self.x_uf[u][p]) == 0.0:
-                    d_v_uf[p, f] = 0.0
-                else:
-                    d_v_uf[p, f] = (self.x_uf[u][p]) * (self.v_i[i][f] - self.v_i[j][f] + np.dot(self.v_if.T[f], self.x_if[i] - self.x_if[j]))
-            for q in range(Q):
-                if (self.x_if[i][q] - self.x_if[j][q]) == 0.0:
-                    d_v_if[q, f] = 0.0
-                else:
-                    d_v_if[q, f] = (self.x_if[i][q] - self.x_if[j][q]) * (self.v_u[u][f] + np.dot(self.v_uf.T[f], self.x_uf[u]))
-
-        # perform the gradient updates to the relevant model weights
-        self.w_i[i] += self.learning_rate * ((d_con * d_w_i)  - (d_reg * self.w_i[i]))
-        self.w_i[j] += self.learning_rate * ((d_con * d_w_j)  - (d_reg * self.w_i[j]))
-        self.w_if   += self.learning_rate * ((d_con * d_w_if) - (d_reg * self.w_if))
-        self.v_u[u] += self.learning_rate * ((d_con * d_v_u)  - (d_reg * self.v_u[u]))
-        self.v_i[i] += self.learning_rate * ((d_con * d_v_i)  - (d_reg * self.v_i[i]))
-        self.v_i[j] += self.learning_rate * ((d_con * d_v_j)  - (d_reg * self.v_i[j]))
-        self.v_uf   += self.learning_rate * ((d_con * d_v_uf) - (d_reg * self.v_uf))
-        self.v_if   += self.learning_rate * ((d_con * d_v_if) - (d_reg * self.v_if))
-
-
-    def _log_likelihood(self, samples):
-        """calculate the regularized log-likelihood of all sample pairs
-
-        :param samples: list of (u, i, j) index position tuples
-        :return: current penalized log-likelihood (scalar)
-        """
-
-        likelihood = sum([np.log(1 / (1 + np.exp(-self._pairwise_utility(u, i, j)))) for u, i, j in samples])
-        penalty = sum([np.sum(self.regularization * np.square(w)) for w in [self.w_i, self.w_if, self.v_u, self.v_i, self.v_uf, self.v_if]])
-        return likelihood - penalty
-
-
-    # --------------------
-    # begin public methods
-    # --------------------
+    # -------------------------------
+    # begin public method definitions
+    # -------------------------------
 
 
     def fit(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
@@ -371,28 +239,33 @@ class RankFM():
         else:
             self._init_all(interactions, user_features, item_features)
 
-        for epoch in range(epochs):
-
-            shuffle_index = np.arange(self.interactions.shape[0])
-            np.random.shuffle(shuffle_index)
-
-            shuffle_samples = sample_tuples(self.interactions.iloc[shuffle_index], set(self.item_idx), self.user_items)
-            for u, i, j in shuffle_samples:
-                self._gradient_step(u, i, j)
-
-            if verbose:
-                ll = self._log_likelihood(shuffle_samples)
-                print("\ntraining epoch: {}".format(epoch))
-                print("penalized log-likelihood: {}".format(round(ll, 2)))
+        updated_weights = _fit(
+            self.interactions,
+            self.user_items_nb,
+            self.item_idx,
+            self.regularization,
+            self.learning_rate,
+            epochs,
+            verbose,
+            self.x_uf,
+            self.x_if,
+            self.w_i,
+            self.w_if,
+            self.v_u,
+            self.v_i,
+            self.v_uf,
+            self.v_if
+        )
+        self.w_i, self.w_if, self.v_u, self.v_i, self.v_uf, self.v_if = updated_weights
 
         self.is_fit = True
         return self
 
 
-    def predict(self, interactions, cold_start='nan'):
+    def predict(self, pairs, cold_start='nan'):
         """calculate the predicted pointwise utilities for all (user, item) pairs
 
-        :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
+        :param pairs: dataframe of [user, item] pairs to score
         :param cold_start: whether to generate missing values ('nan') or drop ('drop') user/item pairs not found in training data
         :return: vector of real-valued model scores
         """
@@ -401,14 +274,22 @@ class RankFM():
         assert self.is_fit, "you must fit the model prior to generating predictions"
 
         # map raw user/item identifiers to internal index positions
-        pred_interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
-        pred_interactions['user_id'] = pred_interactions['user_id'].map(self.user_to_index)
-        pred_interactions['item_id'] = pred_interactions['item_id'].map(self.item_to_index)
-        pred_interactions = pred_interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1)
+        pred_pairs = pd.DataFrame(pairs.copy(), columns=['user_id', 'item_id'])
+        pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
+        pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
 
-        # generate model scores for user/item pairs found in training data and np.nan otherwise
-        pairs = zip(pred_interactions['user_idx'], pred_interactions['item_idx'])
-        scores = np.array([self._pointwise_utility(int(user), int(item)) if not (np.isnan(user) or np.isnan(item)) else np.nan for user, item in pairs])
+        pred_pairs = pred_pairs.to_numpy().astype(np.float32)
+        scores = _predict(
+            pred_pairs,
+            self.x_uf,
+            self.x_if,
+            self.w_i,
+            self.w_if,
+            self.v_u,
+            self.v_i,
+            self.v_uf,
+            self.v_if
+        )
 
         if cold_start == 'nan':
             return scores
@@ -432,25 +313,27 @@ class RankFM():
         # ensure that the model has been fit before attempting to generate predictions
         assert self.is_fit, "you must fit the model prior to generating recommendations"
 
-        def rec_for_user(user_idx):
-            """subroutine to recommend for a single user index"""
-
-            if np.isnan(user_idx):
-                return np.full(n_items, np.nan)
-            else:
-                recs = pd.Series(self._pointwise_utilities(int(user_idx)))
-                if filter_previous:
-                    recs = recs[~recs.isin(self.user_items[int(user_idx)])]
-                return recs.sort_values(ascending=False)[:n_items].index.values
-
-        # generate topN recommended items for all users present in the training data and np.nan otherwise
-        user_idx = pd.Series(users).map(self.user_to_index)
-        top_n = pd.DataFrame([rec_for_user(user) for user in user_idx], index=users).apply(lambda c: c.map(self.index_to_item))
+        user_idx = pd.Series(users).map(self.user_to_index).to_numpy(dtype=np.float32)
+        rec_items = _recommend_for_users(
+            user_idx,
+            self.user_items_nb,
+            n_items,
+            filter_previous,
+            self.x_uf,
+            self.x_if,
+            self.w_i,
+            self.w_if,
+            self.v_u,
+            self.v_i,
+            self.v_uf,
+            self.v_if
+        )
+        rec_items = pd.DataFrame(rec_items, index=users).apply(lambda c: c.map(self.index_to_item))
 
         if cold_start == 'nan':
-            return top_n
+            return rec_items
         elif cold_start == 'drop':
-            return top_n.dropna(how='any')
+            return rec_items.dropna(how='any')
         else:
             raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
 
