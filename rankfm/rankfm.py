@@ -10,7 +10,7 @@ import numpy as np
 import numba as nb
 import pandas as pd
 
-from numba_functions import isin, _fit, _predict, _recommend_for_users
+from numba_methods import isin, _fit, _predict, _recommend_for_users
 # warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
@@ -297,7 +297,6 @@ class RankFM():
             return scores[~np.isnan(scores)]
         else:
             raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
-
 
 
     def recommend_for_users(self, users, n_items=10, filter_previous=False, cold_start='nan'):
