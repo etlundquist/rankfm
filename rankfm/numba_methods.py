@@ -11,11 +11,38 @@ import numba as nb
 
 
 @nb.njit
-def isin(needle, haystack):
-    for i in range(len(haystack)):
-        if needle == haystack[i]:
+def isin_1(item, items):
+    """linear search for a given item in a sorted array"""
+
+    for i in items:
+        if item == i:
             return True
     return False
+
+
+@nb.njit
+def isin_2(item, items):
+    """binary search for a given item in a sorted array"""
+
+    remaining = items.copy()
+    lo = 0
+    hi = len(remaining)
+    md = int((lo + hi) / 2)
+
+    while True:
+
+        if remaining[md] == item:
+            return True
+        elif (lo == md) or (hi == md):
+            return False
+        elif remaining[md] < item:
+            remaining = remaining[md:]
+        else:
+            remaining = remaining[:md]
+
+        lo = 0
+        hi = len(remaining)
+        md = int((lo + hi) / 2)
 
 
 @nb.njit
@@ -35,6 +62,7 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
     P = x_uf.shape[1]
     Q = x_if.shape[1]
     F = v_i.shape[1]
+    I = len(item_idx)
 
     for epoch in range(epochs):
 
@@ -48,11 +76,10 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
 
             u = interactions[row, 0]
             i = interactions[row, 1]
-            n_items = len(item_idx)
 
             while True:
-                j = int(n_items * random.random())
-                if not isin(j, user_items[u]):
+                j = int(I * random.random())
+                if not isin_1(j, user_items[u]):
                     break
 
             pu_i = w_i[i] - w_i[j]
@@ -188,7 +215,7 @@ def _recommend_for_users(users, user_items, n_items, filter_previous, x_uf, x_if
 
             s = 0
             for item in ranked_items:
-                if filter_previous and isin(item, user_items[u]):
+                if filter_previous and isin_1(item, user_items[u]):
                     continue
                 else:
                     selected_items[s] = item
