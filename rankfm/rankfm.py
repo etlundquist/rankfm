@@ -345,6 +345,9 @@ class RankFM():
         :return: topN most similar items wrt latent factor representations
         """
 
+        # ensure that the model has been fit before attempting to generate predictions
+        assert self.is_fit, "you must fit the model prior to generating similarities"
+
         try:
             item_idx = self.item_to_index.loc[item_id]
         except (KeyError, TypeError):
@@ -365,6 +368,9 @@ class RankFM():
         :param n_users: number of similar users to return
         :return: topN most similar users wrt latent factor representations
         """
+
+        # ensure that the model has been fit before attempting to generate predictions
+        assert self.is_fit, "you must fit the model prior to generating similarities"
 
         try:
             user_idx = self.user_to_index.loc[user_id]
