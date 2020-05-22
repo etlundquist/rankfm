@@ -10,7 +10,7 @@ import numpy as np
 import numba as nb
 import pandas as pd
 
-from numba_methods import isin, _fit, _predict, _recommend_for_users
+from numba_methods import _fit, _predict, _recommend_for_users
 # warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
@@ -136,7 +136,7 @@ class RankFM():
         # NOTE: the interactions data must be converted to np.ndarray prior to training to use @njit
 
         self.user_items_nb = nb.typed.Dict.empty(key_type=nb.types.int32, value_type=nb.types.int32[:])
-        self.user_items_py = self.interactions.groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
+        self.user_items_py = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
         self.interactions = self.interactions.to_numpy()
 
         for user, items in self.user_items_py.items():
