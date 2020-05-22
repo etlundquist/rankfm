@@ -337,3 +337,44 @@ class RankFM():
             raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
 
 
+    def similar_items(self, item_id, n_items=10):
+        """find the most similar items wrt latent factor space representation
+
+        :param item_id: item to search
+        :param n_items: number of similar items to return
+        :return: topN most similar items wrt latent factor representations
+        """
+
+        try:
+            item_idx = self.item_to_index.loc[item_id]
+        except (KeyError, TypeError):
+            print("item_id={} not found in training data".format(item_id))
+
+        lr_item = self.v_i[item_idx] + np.dot(self.v_if.T, self.x_if[item_idx])
+        lr_all_items = self.v_i + np.dot(self.x_if, self.v_if)
+
+        similarities = pd.Series(np.dot(lr_all_items, lr_item)).drop(item_idx).sort_values(ascending=False)[:n_items]
+        most_similar = pd.Series(similarities.index).map(self.index_to_item)
+        return most_similar
+
+
+    def similar_users(self, user_id, n_users=10):
+        """find the most similar users wrt latent factor space representation
+
+        :param user_id: user to search
+        :param n_users: number of similar users to return
+        :return: topN most similar users wrt latent factor representations
+        """
+
+        try:
+            user_idx = self.user_to_index.loc[user_id]
+        except (KeyError, TypeError):
+            print("user_id={} not found in training data".format(user_id))
+
+        lr_user = self.v_i[user_idx] + np.dot(self.v_uf.T, self.x_uf[user_idx])
+        lr_all_users = self.v_i + np.dot(self.x_uf, self.v_uf)
+
+        similarities = pd.Series(np.dot(lr_all_users, lr_user)).drop(user_idx).sort_values(ascending=False)[:n_users]
+        most_similar = pd.Series(similarities.index).map(self.index_to_user)
+        return most_similar
+
