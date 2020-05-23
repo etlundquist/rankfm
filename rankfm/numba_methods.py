@@ -59,6 +59,7 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
     """
 
+    # define matrix dimension shapes
     P = x_uf.shape[1]
     Q = x_if.shape[1]
     F = v_i.shape[1]
@@ -66,31 +67,37 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
 
     for epoch in range(epochs):
 
+        # randomly re-shuffle the observed interactions to diversify training epochs
         shuffle_index = np.arange(len(interactions))
         np.random.shuffle(shuffle_index)
-
         interactions = interactions[shuffle_index]
         log_likelihood = 0.0
 
         for row in range(len(interactions)):
 
+            # locate the user (u) and observed item (i)
             u = interactions[row, 0]
             i = interactions[row, 1]
 
+            # randomly sample an unobserved item (j) for the user
             while True:
                 j = int(I * random.random())
                 if not isin_1(j, user_items[u]):
                     break
 
+            # calculate the pairwise utility score for the (u, i, j) triplet
+
             pu_i = w_i[i] - w_i[j]
             pu_if = np.dot(x_if[i] - x_if[j], w_if)
-            pu_ui = np.dot(v_i[i] - v_i[j], v_u[u])
+            pu_u_i = np.dot(v_i[i] - v_i[j], v_u[u])
             pu_u_if = np.dot(x_if[i] - x_if[j], np.dot(v_if, v_u[u]))
             pu_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
             pu_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
 
-            pairwise_utility = pu_i + pu_if + pu_ui + pu_u_if + pu_i_uf + pu_uf_if
+            pairwise_utility = pu_i + pu_if + pu_u_i + pu_u_if + pu_i_uf + pu_uf_if
             log_likelihood += np.log(1 / (1 + np.exp(-pairwise_utility)))
+
+            # calculate derivatives of the model penalized log-likelihood function
 
             d_con = 1.0 / (np.exp(pairwise_utility) + 1.0)
             d_reg = 2.0 * regularization
@@ -118,6 +125,7 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
                     else:
                         d_v_if[q, f] = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
 
+            # update model weights for this (u, i, j) triplet with a gradient step
             w_i[i] += learning_rate * ((d_con * d_w_i)  - (d_reg * w_i[i]))
             w_i[j] += learning_rate * ((d_con * d_w_j)  - (d_reg * w_i[j]))
             w_if   += learning_rate * ((d_con * d_w_if) - (d_reg * w_if))
@@ -127,6 +135,7 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
             v_uf   += learning_rate * ((d_con * d_v_uf) - (d_reg * v_uf))
             v_if   += learning_rate * ((d_con * d_v_if) - (d_reg * v_if))
 
+        # calculate the cumulative penalized log-likelihood for this training epoch
         penalty = 0.0
         penalty += np.sum(regularization * np.square(w_i))
         penalty += np.sum(regularization * np.square(w_if))
@@ -151,29 +160,34 @@ def _predict(pairs, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     :return: np.array[float32] of corresponding utility scores
     """
 
+    # initialize the scores vector
     n_scores = len(pairs)
     scores = np.empty(n_scores, dtype=np.float32)
 
     for row in range(n_scores):
 
+        # locate the user/item to score
         u = pairs[row, 0]
         i = pairs[row, 1]
 
+        # set the score to nan if the user or item not found
         if np.isnan(u) or np.isnan(i):
             scores[row] = np.nan
         else:
 
+            # calculate the pointwise utility score for the (u, i) pair
+
             u = int(u)
             i = int(i)
 
-            item = w_i[i]
-            item_features = np.dot(x_if[i], w_if)
-            item_user = np.dot(v_i[i], v_u[u])
-            user_item_features = np.dot(x_if[i], np.dot(v_if, v_u[u]))
-            item_user_features = np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
-            feature_interactions = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i]))
+            ut_i = w_i[i]
+            ut_if = np.dot(x_if[i], w_if)
+            ut_u_i = np.dot(v_i[i], v_u[u])
+            ut_u_if = np.dot(x_if[i], np.dot(v_if, v_u[u]))
+            ut_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
+            ut_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i]))
 
-            item_utility = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
+            item_utility = ut_i + ut_if + ut_u_i + ut_u_if + ut_i_uf + ut_uf_if
             scores[row] = item_utility
 
     return scores
@@ -190,29 +204,33 @@ def _recommend_for_users(users, user_items, n_items, filter_previous, x_uf, x_if
     :return: np.array[float32] where rows are users and columns are recommended items
     """
 
+    # initialize the recs matrix
     n_users = len(users)
     rec_items = np.empty((n_users, n_items), dtype=np.float32)
 
     for row in range(n_users):
 
+        # set the rec item vector to nan if the user not found
         u = users[row]
         if np.isnan(u):
             rec_items[row] = np.full(n_items, np.nan, dtype=np.float32)
         else:
-
             u = int(u)
 
-            item = w_i
-            item_features = np.dot(x_if, w_if)
-            item_user = np.dot(v_i, v_u[u])
-            user_item_features = np.dot(x_if, np.dot(v_if, v_u[u]))
-            item_user_features = np.dot(np.dot(v_uf, v_i.T).T, x_uf[u])
-            feature_interactions = np.dot(np.dot(x_if, v_if), np.dot(v_uf.T, x_uf[u]))
+            # calculate the pointwise utility scores of all items for the user
+            ut_i = w_i
+            ut_if = np.dot(x_if, w_if)
+            ut_u_i = np.dot(v_i, v_u[u])
+            ut_u_if = np.dot(x_if, np.dot(v_if, v_u[u]))
+            ut_i_uf = np.dot(np.dot(v_uf, v_i.T).T, x_uf[u])
+            ut_uf_if = np.dot(np.dot(x_if, v_if), np.dot(v_uf.T, x_uf[u]))
+            item_utilities = ut_i + ut_if + ut_u_i + ut_u_if + ut_i_uf + ut_uf_if
 
-            item_utilities = item + item_features + item_user + user_item_features + item_user_features + feature_interactions
+            # get a ranked list of item index positions for the user
             ranked_items = np.argsort(item_utilities)[::-1]
             selected_items = np.empty(n_items, dtype=np.int32)
 
+            # select the topN items for each user, optionally skipping previously observed items
             s = 0
             for item in ranked_items:
                 if filter_previous and isin_1(item, user_items[u]):

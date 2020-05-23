@@ -353,9 +353,11 @@ class RankFM():
         except (KeyError, TypeError):
             print("item_id={} not found in training data".format(item_id))
 
+        # calculate item latent representations in F dimensional factor space
         lr_item = self.v_i[item_idx] + np.dot(self.v_if.T, self.x_if[item_idx])
         lr_all_items = self.v_i + np.dot(self.x_if, self.v_if)
 
+        # calculate the most similar N items excluding the search item
         similarities = pd.Series(np.dot(lr_all_items, lr_item)).drop(item_idx).sort_values(ascending=False)[:n_items]
         most_similar = pd.Series(similarities.index).map(self.index_to_item)
         return most_similar
@@ -377,9 +379,11 @@ class RankFM():
         except (KeyError, TypeError):
             print("user_id={} not found in training data".format(user_id))
 
+        # calculate item latent representations in F dimensional factor space
         lr_user = self.v_i[user_idx] + np.dot(self.v_uf.T, self.x_uf[user_idx])
         lr_all_users = self.v_i + np.dot(self.x_uf, self.v_uf)
 
+        # calculate the most similar N users excluding the search user
         similarities = pd.Series(np.dot(lr_all_users, lr_user)).drop(user_idx).sort_values(ascending=False)[:n_users]
         most_similar = pd.Series(similarities.index).map(self.index_to_user)
         return most_similar
