@@ -17,21 +17,33 @@ from rankfm.numba_methods import _fit, _predict, _recommend_for_users
 class RankFM():
     """Factorization Machines for Ranking Problems with Implicit Feedback Data"""
 
-    def __init__(self, factors=10, learning_rate=0.1, regularization=0.01, sigma=0.1):
+    def __init__(self, factors=10, regularization=0.01, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
         """store hyperparameters and initialize internal data
 
         :param factors: latent factor rank
-        :param learning_rate: learning rate for gradient step weight updates
         :param regularization: L2 regularization penalty on model weights
         :param sigma: standard deviation to use for random initialization of factor weights
+        :param learning_rate: initial learning rate for gradient step updates
+        :param learning_schedule: schedule for adjusting learning rates by training epoch: ['constant', 'invscaling']
+        :param learning_exponent: exponent applied to epoch number to adjust learning rate: scaling = 1 / pow(epoch + 1, learning_exponent)
         :return: None
         """
 
+        # validate user inputs
+        assert isinstance(factors, int) and factors >= 1, "[factors] must be a positive integer"
+        assert isinstance(regularization, float) and regularization >= 0.0, "[regularization] must be a non-negative float"
+        assert isinstance(sigma, float) and sigma > 0.0, "[sigma] must be a positive float"
+        assert isinstance(learning_rate, float) and learning_rate > 0.0, "[learning_rate] must be a positive float"
+        assert isinstance(learning_schedule, str) and learning_schedule in ('constant', 'invscaling'), "[learning_schedule] must be in ('constant', 'invscaling')"
+        assert isinstance(learning_exponent, float) and learning_exponent > 0.0, "[learning_exponent] must be a positive float"
+
         # store hyperparameters
         self.factors = factors
-        self.learning_rate = learning_rate
         self.regularization = regularization
         self.sigma = sigma
+        self.learning_rate = learning_rate
+        self.learning_schedule = learning_schedule
+        self.learning_exponent = learning_exponent
 
         # set/clear initial model state
         self._reset_state()
@@ -245,6 +257,8 @@ class RankFM():
             self.item_idx,
             self.regularization,
             self.learning_rate,
+            self.learning_schedule,
+            self.learning_exponent,
             epochs,
             verbose,
             self.x_uf,

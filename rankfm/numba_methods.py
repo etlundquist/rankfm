@@ -46,7 +46,7 @@ def isin_2(item, items):
 
 
 @nb.njit
-def _fit(interactions, user_items, item_idx, regularization, learning_rate, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
+def _fit(interactions, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """private JIT model-fitting function
 
     :param interactions: np.array[int32] of observed [user_idx, item_idx] iteractions
@@ -54,6 +54,8 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
     :param item_idx: np.array[int32] of unique item_idx values found in interactions data
     :param regularization: L2 regularization penalty
     :param learning_rate: SGD weight update learning rate
+    :param learning_schedule: tag for adjusting the learning rate as a function of training epoch
+    :param learning_exponent: exponent used to calculate the inverse scaling factor
     :param epochs: number of training epochs (full passes through observed interactions)
     :param verbose: whether to print training epoch and penalized log-likelihood to console
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
@@ -66,6 +68,14 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
     I = len(item_idx)
 
     for epoch in range(epochs):
+
+        # set the new learning rate (eta) for this epoch
+        if learning_schedule == 'constant':
+            eta = learning_rate
+        elif learning_schedule == 'invscaling':
+            eta = learning_rate / (epoch + 1)**learning_exponent
+        else:
+            raise ValueError('unknown [learning_schedule]')
 
         # randomly re-shuffle the observed interactions to diversify training epochs
         shuffle_index = np.arange(len(interactions))
@@ -126,14 +136,14 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, epoc
                         d_v_if[q, f] = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
 
             # update model weights for this (u, i, j) triplet with a gradient step
-            w_i[i] += learning_rate * ((d_con * d_w_i)  - (d_reg * w_i[i]))
-            w_i[j] += learning_rate * ((d_con * d_w_j)  - (d_reg * w_i[j]))
-            w_if   += learning_rate * ((d_con * d_w_if) - (d_reg * w_if))
-            v_u[u] += learning_rate * ((d_con * d_v_u)  - (d_reg * v_u[u]))
-            v_i[i] += learning_rate * ((d_con * d_v_i)  - (d_reg * v_i[i]))
-            v_i[j] += learning_rate * ((d_con * d_v_j)  - (d_reg * v_i[j]))
-            v_uf   += learning_rate * ((d_con * d_v_uf) - (d_reg * v_uf))
-            v_if   += learning_rate * ((d_con * d_v_if) - (d_reg * v_if))
+            w_i[i] += eta * ((d_con * d_w_i)  - (d_reg * w_i[i]))
+            w_i[j] += eta * ((d_con * d_w_j)  - (d_reg * w_i[j]))
+            w_if   += eta * ((d_con * d_w_if) - (d_reg * w_if))
+            v_u[u] += eta * ((d_con * d_v_u)  - (d_reg * v_u[u]))
+            v_i[i] += eta * ((d_con * d_v_i)  - (d_reg * v_i[i]))
+            v_i[j] += eta * ((d_con * d_v_j)  - (d_reg * v_i[j]))
+            v_uf   += eta * ((d_con * d_v_uf) - (d_reg * v_uf))
+            v_if   += eta * ((d_con * d_v_if) - (d_reg * v_if))
 
         # calculate the cumulative penalized log-likelihood for this training epoch
         penalty = 0.0
