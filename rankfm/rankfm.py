@@ -10,7 +10,7 @@ import numpy as np
 import numba as nb
 import pandas as pd
 
-from numba_methods import _fit, _predict, _recommend_for_users
+from rankfm.numba_methods import _fit, _predict, _recommend_for_users
 # warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
