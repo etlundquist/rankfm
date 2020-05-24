@@ -37,7 +37,7 @@ def hit_rate(model, test_interactions, k=10, filter_previous=False):
 
 
 def reciprocal_rank(model, test_interactions, k=10, filter_previous=False):
-    """evaluate hit-rate (any match) wrt out-of-sample observed interactions
+    """evaluate reciprocal rank wrt out-of-sample observed interactions
 
     :param model: trained RankFM model instance
     :param test_interactions: pandas dataframe of out-of-sample observed user/item interactions
@@ -58,7 +58,7 @@ def reciprocal_rank(model, test_interactions, k=10, filter_previous=False):
     test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
-    # calculate the hit rate (percentage of users with any relevant recommendation) wrt common users
+    # calculate the reciprocal rank (inverse rank of the first relevant recommended item) wrt common users
     match_indexes = [np.where(test_recs.loc[u].isin(set(test_recs.loc[u]) & test_user_items[u]))[0] for u in comm_user]
     reciprocal_rank = np.mean([1 / (np.min(index) + 1) if len(index) > 0 else 0 for index in match_indexes])
     return reciprocal_rank
@@ -86,7 +86,7 @@ def discounted_cumulative_gain(model, test_interactions, k=10, filter_previous=F
     test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
-    # calculate the hit rate (percentage of users with any relevant recommendation) wrt common users
+    # calculate the discounted cumulative gain (sum of inverse log scaled ranks of relevant items) wrt common users
     match_indexes = [np.where(test_recs.loc[u].isin(set(test_recs.loc[u]) & test_user_items[u]))[0] for u in comm_user]
     discounted_cumulative_gain = np.mean([np.sum(1 / np.log2(index + 2)) if len(index) > 0 else 0 for index in match_indexes])
     return discounted_cumulative_gain
