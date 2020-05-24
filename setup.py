@@ -5,7 +5,8 @@ setup(
     version='0.1.0',
     description='a python implementation of the generic factorization machines model class '
                 'adapted for collaborative filtering recommendation/ranking problems '
-                'with implicit feedback user-item interaction data',
+                'with implicit feedback user-item interaction data '
+                'and (optionally) additional user/item side features',
     author='Eric Lundquist',
     author_email='e.t.lundquist@gmail.com',
     url='https://github.com/etlundquist/rankfm',
