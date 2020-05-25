@@ -122,6 +122,7 @@ model.similar_items(2997, n_items=10)
 ```
 Let's get weird...
 
+---
 That's all for now. To see more in-depth worked examples in jupyter notebook format head to the `/examples` folder. Be sure to check back for added functionality and PyPI release status in the near future as soon as I teach myself how to use CI workflows and go where few data scientists have gone before: a comprehensive set of unit tests. Stay tuned...
 
 ---
