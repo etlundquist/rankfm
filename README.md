@@ -1,5 +1,4 @@
 # RankFM
-Factorization Machines for Recommendation with Implicit Feedback Data
 ---
 
 RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses the Bayesian Personalized Ranking (BPR-OPT) optimization criteria described in [Rendle 2009](https://arxiv.org/pdf/1205.2618.pdf) to learn model weights via Stochastic Gradient Descent (SGD). It can also incorporate user and/or item auxiliary features to augment the main interaction data which may increase model performance, especially in contexts where interaction data is highly sparse but rich user/item metadata features exist.
