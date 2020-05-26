@@ -1,6 +1,6 @@
-# excluded folders
+# exclude data and private notebooks
 data/
-notebooks/old/
+examples/ignore/
 
 # system files
 *.DS_Store
@@ -17,17 +17,12 @@ lib/
 lib64/
 parts/
 sdist/
-var/
-wheels/
 pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
-
-# sphinx documentation
-docs/_build/
 
 # spark stuff
 */derby.log

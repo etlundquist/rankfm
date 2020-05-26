@@ -204,7 +204,7 @@ def _predict(pairs, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
 
 
 @nb.njit
-def _recommend_for_users(users, user_items, n_items, filter_previous, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
+def _recommend(users, user_items, n_items, filter_previous, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """internal JIT user scoring function
 
     :param users: np.array[float32] of user indexes potentially containing np.nan
