@@ -41,6 +41,13 @@ intx_train_pd_rating = pd.DataFrame([
     (3, 3, 3), (3, 6, 4), (3, 4, 5)
 ], columns=['user_id', 'item_id', 'rating'], dtype=np.int32)
 
+# valid interactions with disjoint user/items
+intx_valid_disjoint = pd.DataFrame([
+    (1, 1), (1, 3), (1, 5),
+    (2, 1), (2, 2), (2, 7),
+    (4, 3), (4, 7), (4, 4)
+], columns=['user_id', 'item_id'], dtype=np.int32)
+
 # user features
 # -------------
 
@@ -115,6 +122,12 @@ if_str_cols = pd.DataFrame([
     (6, 0, 0, "G", 0.00)
 ], columns=['item_id', 'bin_1', 'bin_2', 'str', 'cnt'])
 
+# user iterables
+# --------------
+
+train_users = np.array([1, 2, 3])
+valid_users = np.array([1, 2, 4, 5])
+
 # ------------------------------
 # test basic model functionality
 # ------------------------------
@@ -178,10 +191,198 @@ def test__fit__bad__if_str_cols():
         model = RankFM(factors=2)
         model.fit(intx_train_pd_int, item_features=if_str_cols)
 
+# score prediction
+# ----------------
+
+def test__predict__good__train():
+    """test the predict() method on the training inputs"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    scores = model.predict(intx_train_pd_int)
+
+    shape = scores.shape == (9,)
+    dtype = scores.dtype == np.float32
+    nmiss = np.sum(np.isnan(scores).astype(np.int32)) == 0
+    assert shape and dtype and nmiss
+
+def test__predict__good__disjoint_nan():
+    """test the predict() method on disjoint validation pairs with the cold_start='nan' option"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    scores = model.predict(intx_valid_disjoint, cold_start='nan')
+
+    shape = scores.shape == (9,)
+    dtype = scores.dtype == np.float32
+    nmiss = np.sum(np.isnan(scores).astype(np.int32)) == 4
+    assert shape and dtype and nmiss
+
+def test__predict__good__disjoint_drop():
+    """test the predict() method on disjoint validation pairs with the cold_start='drop' option"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    scores = model.predict(intx_valid_disjoint, cold_start='drop')
+
+    shape = scores.shape == (5,)
+    dtype = scores.dtype == np.float32
+    nmiss = np.sum(np.isnan(scores).astype(np.int32)) == 0
+    assert shape and dtype and nmiss
+
+# user recommendation
+# -------------------
+
+def test__recommend__good__train():
+    """test the recommend() method on the training users"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    recs = model.recommend(train_users, n_items=3)
+
+    klass = isinstance(recs, pd.DataFrame)
+    shape = recs.shape == (3, 3)
+    index = np.array_equal(recs.index.values, train_users)
+    items = recs.isin(intx_train_pd_int['item_id'].values).all().all()
+    assert klass and shape and index and items
+
+def test__recommend__good__train__filter():
+    """test the recommend() method on the training users but filter previous items"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    recs = model.recommend(train_users, n_items=3, filter_previous=True)
+
+    klass = isinstance(recs, pd.DataFrame)
+    shape = recs.shape == (3, 3)
+    index = np.array_equal(recs.index.values, train_users)
+    items = recs.isin(intx_train_pd_int['item_id'].values).all().all()
+
+    recs_long = recs.stack().reset_index().drop('level_1', axis=1)
+    recs_long.columns = ['user_id', 'item_id']
+    intersect = pd.merge(intx_train_pd_int, recs_long, on=['user_id', 'item_id'], how='inner').empty
+    assert klass and shape and index and items and intersect
+
+def test__recommend__good__valid__nan():
+    """test the recommend() method on a disjoint set of validation users"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    recs = model.recommend(valid_users, n_items=3, cold_start='nan')
+
+    klass = isinstance(recs, pd.DataFrame)
+    shape = recs.shape == (4, 3)
+    index = np.array_equal(sorted(recs.index.values), sorted(valid_users))
+    items = recs.dropna().isin(intx_train_pd_int['item_id'].values).all().all()
+    new_users = list(set(valid_users) - set(train_users))
+    nmiss = recs.loc[new_users].isnull().all().all()
+    assert klass and shape and index and items and nmiss
+
+def test__recommend__good__valid__drop():
+    """test the recommend() method on a disjoint set of validation users"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    recs = model.recommend(valid_users, n_items=3, cold_start='drop')
+
+    klass = isinstance(recs, pd.DataFrame)
+    shape = recs.shape == (2, 3)
+    index = np.isin(recs.index.values, valid_users).all()
+    items = recs.dropna().isin(intx_train_pd_int['item_id'].values).all().all()
+
+    same_users = list(set(valid_users) & set(train_users))
+    match_users = np.array_equal(sorted(same_users), sorted(recs.index.values))
+    assert klass and shape and index and items and match_users
+
+# similar items/users
+# -------------------
+
+def test__similar_items__good():
+    """test the similar_items() method for a valid [item_id]"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    similar = model.similar_items(1, n_items=3)
+
+    shape = similar.shape == (3,)
+    items = np.isin(similar, intx_train_pd_int['item_id'].unique()).all()
+    assert shape and items
+
+def test__similar_items__bad():
+    """ensure the similar_items() method raises an exception for an item not in training data"""
+
+    with pytest.raises(AssertionError):
+        model = RankFM(factors=2)
+        model.fit(intx_train_pd_int)
+        similar = model.similar_items(99, n_items=3)
 
 
+def test__similar_users__good():
+    """test the similar_users() method for a valid [user_id]"""
+
+    model = RankFM(factors=2)
+    model.fit(intx_train_pd_int)
+    similar = model.similar_users(1, n_users=2)
+
+    shape = similar.shape == (2,)
+    users = np.isin(similar, intx_train_pd_int['user_id'].unique()).all()
+    assert shape and users
+
+def test__similar_users__bad():
+    """ensure the similar_users() method raises an exception for an user not in training data"""
+
+    with pytest.raises(AssertionError):
+        model = RankFM(factors=2)
+        model.fit(intx_train_pd_int)
+        similar = model.similar_users(9, n_users=1)
+
+
+
+# model evaluation
+# ----------------
+
+# model = RankFM(factors=2)
+# model.fit(intx_train_pd_int)
+# recs = model.recommend(valid_users, n_items=3, cold_start='drop')
+
+# klass = isinstance(recs, pd.DataFrame)
+# shape = recs.shape == (2, 3)
+# index = np.array_equal(recs.index.values, valid_users)
+# items = recs.dropna().isin(intx_train_pd_int['item_id'].values).all().all()
+
+# same_users = list(set(valid_users) & set(train_users))
+# match_users = np.array_equal(sorted(same_users), sorted(recs.index.values))
+# assert klass and shape and index and items and match_users
 
 
 
 # model = RankFM(factors=2)
-# model.fit(interactions=intx_train_pd_int, user_features=uf_no_id)
+# model.fit(intx_train_pd_int)
+# recs = model.recommend(valid_users, n_items=3, cold_start='drop')
+
+# klass = isinstance(recs, pd.DataFrame)
+# shape = recs.shape == (4, 3)
+# index = np.array_equal(recs.index.values, valid_users)
+# items = recs.dropna().isin(intx_train_pd_int['item_id'].values).all().all()
+
+# same_users = list(set(valid_users) & set(train_users))
+# match_users = np.array_equal(sorted(same_users), sorted(recs.index.values))
+# assert klass and shape and index and items and match_users
+
+# model = RankFM(factors=2)
+# model.fit(interactions=intx_train_pd_int)
+# scores = model.predict(intx_train_pd_int)
+# recs = model.recommend(train_users, n_items=3, filter_previous=True)
+
+# model.similar_users(1, n_users=1)
+# model.similar_users(9, n_users=1)
+
+# model.similar_items(1, n_items=3)
+# model.similar_items(99, n_items=3)
+
+# v_u = model.v_u
+
+# x_uf = model.x_uf
+# v_uf = model.v_uf
+
+# res_inner = np.dot(x_uf, v_uf)

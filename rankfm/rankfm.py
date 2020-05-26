@@ -247,14 +247,12 @@ class RankFM():
         :return: self
         """
 
-        # initialize necessary internal data structures
         if self.is_fit:
             self._init_interactions(interactions)
             self._init_features(user_features, item_features)
         else:
             self._init_all(interactions, user_features, item_features)
 
-        # call numba internals
         updated_weights = _fit(
             self.interactions,
             self.user_items_nb,
@@ -285,18 +283,16 @@ class RankFM():
 
         :param pairs: dataframe of [user, item] pairs to score
         :param cold_start: whether to generate missing values ('nan') or drop ('drop') user/item pairs not found in training data
-        :return: vector of real-valued model scores
+        :return: np.array of real-valued model scores
         """
 
-        # ensure that the model has been fit before attempting to generate predictions
+        assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
 
-        # map raw user/item identifiers to internal index positions
         pred_pairs = pd.DataFrame(pairs.copy(), columns=['user_id', 'item_id'])
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
 
-        # call numba internals
         pred_pairs = pred_pairs.to_numpy().astype(np.float32)
         scores = _predict(
             pred_pairs,
@@ -321,17 +317,16 @@ class RankFM():
     def recommend(self, users, n_items=10, filter_previous=False, cold_start='nan'):
         """calculate the topN items for each user
 
-        :param users: list-like of user identifiers for which to generate recommendations
+        :param users: iterable of user identifiers for which to generate recommendations
         :param n_items: number of recommended items to generate for each user
         :param filter_previous: remove observed training items from generated recommendations
         :param cold_start: whether to generate missing values ('nan') or drop ('drop') users not found in training data
         :return: pandas dataframe where the index values are user identifiers and the columns are recommended items
         """
 
-        # ensure that the model has been fit before attempting to generate predictions
+        assert getattr(users, '__iter__', False), "[users] must be an iterable (e.g. list, array, series)"
         assert self.is_fit, "you must fit the model prior to generating recommendations"
 
-        # call numba internals
         user_idx = pd.Series(users).map(self.user_to_index).to_numpy(dtype=np.float32)
         rec_items = _recommend(
             user_idx,
@@ -362,10 +357,11 @@ class RankFM():
 
         :param item_id: item to search
         :param n_items: number of similar items to return
-        :return: topN most similar items wrt latent factor representations
+        :return: np.array of topN most similar items wrt latent factor representations
         """
 
         # ensure that the model has been fit before attempting to generate predictions
+        assert item_id in self.item_id, "you must select an [item_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
         try:
@@ -379,7 +375,7 @@ class RankFM():
 
         # calculate the most similar N items excluding the search item
         similarities = pd.Series(np.dot(lr_all_items, lr_item)).drop(item_idx).sort_values(ascending=False)[:n_items]
-        most_similar = pd.Series(similarities.index).map(self.index_to_item)
+        most_similar = pd.Series(similarities.index).map(self.index_to_item).values
         return most_similar
 
 
@@ -388,10 +384,11 @@ class RankFM():
 
         :param user_id: user to search
         :param n_users: number of similar users to return
-        :return: topN most similar users wrt latent factor representations
+        :return: np.array of topN most similar users wrt latent factor representations
         """
 
         # ensure that the model has been fit before attempting to generate predictions
+        assert user_id in self.user_id, "you must select an [user_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
         try:
@@ -399,12 +396,12 @@ class RankFM():
         except (KeyError, TypeError):
             print("user_id={} not found in training data".format(user_id))
 
-        # calculate item latent representations in F dimensional factor space
-        lr_user = self.v_i[user_idx] + np.dot(self.v_uf.T, self.x_uf[user_idx])
-        lr_all_users = self.v_i + np.dot(self.x_uf, self.v_uf)
+        # calculate user latent representations in F dimensional factor space
+        lr_user = self.v_u[user_idx] + np.dot(self.v_uf.T, self.x_uf[user_idx])
+        lr_all_users = self.v_u + np.dot(self.x_uf, self.v_uf)
 
         # calculate the most similar N users excluding the search user
         similarities = pd.Series(np.dot(lr_all_users, lr_user)).drop(user_idx).sort_values(ascending=False)[:n_users]
-        most_similar = pd.Series(similarities.index).map(self.index_to_user)
+        most_similar = pd.Series(similarities.index).map(self.index_to_user).values
         return most_similar
 
