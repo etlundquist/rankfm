@@ -6,9 +6,9 @@ RankFM's core training/prediction/recommendation subroutines are converted to op
 
 Designed for ease-of-use, RankFM accepts both `pd.DataFrame` and `np.ndarray` inputs. You do not have to convert your data to `scipy.sparse` matrices or re-map user/item identifiers to array indexes prior to use - internally RankFM maps all user/item identifiers to zero-based integer indexes, but always converts its output back to the original user/item identifiers from your data, which can be arbitrary (non-zero-based, non-consecutive) integers or even strings.
 
-In addition to the familiar `fit()`, `predict()`, `recommend_for_users()` methods, RankFM includes additional utilities to find the most similar items for a given item and the most similar users for a given user based on user/item latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions are included in the `evaluation` module including [hit rate, reciprocal rank, discounted cumulative gain, precision, recall] to streamline model performance tuning/evaluation.
+In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes additional utilities to find the most similar users/items to a given user/item based on user/item latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions are also included in the `evaluation` module to streamline model performance tuning and evaluation.
 
-See the **Quickstart** section below to get started, and the `quickstart.ipynb` notebook in the `/examples` folder for a more in-depth walkthrough. This package is currently under active development pre-release, and should not yet be considered stable. Release, build status, and PyPI information will be added once things get to a stable and satisfactory state for an initial release. The core functionality is mostly in place and working, but automated tests and CI workflows need to be added, and I need to teach myself how to do all that stuff first :). Stay tuned...
+See the **Quickstart** section below to get started, and the `quickstart.ipynb` notebook in the `/examples` folder for a more in-depth walkthrough. This package is currently under active development pre-release, and should not yet be considered stable. Release, build status, and PyPI information will be added once things get to a stable and satisfactory state for an initial release. The core functionality is mostly in place and working, but automated tests and CI workflows need to be added, and I need to teach myself how to do all that stuff first :)
 
 ---
 ### Dependencies
@@ -27,13 +27,13 @@ pip install git+https://github.com/etlundquist/rankfm.git#egg=rankfm
 Let's work through a simple example of fitting a model, generating recommendations, evaluating performance, and assessing some item-item similarities. The data we'll be using here may already be somewhat familiar: you know it, you love it, it's the [MovieLens 1M](https://grouplens.org/datasets/movielens/1m/)!
 
 Let's first look at the required shape of the interaction data:
-```
+
 | user_id | item_id |
 |---------|---------|
 | 3       | 233     |
 | 5       | 377     |
 | 8       | 610     |
-```
+
 It has just two columns: a `user_id` and an `item_id` (although you can name these fields whatever you want or use a numpy array instead). Notice that there is no `rating` column - this library is for **implicit feedback** data (e.g. watches, page views, purchases, clicks) as opposed to **explicit feedback** data (e.g. 1-5 ratings, thumbs up/down). Implicit feedback is far more common in real-world recommendation contexts and doesn't suffer from the missing-not-at-random problem of pure explicit feedback approaches. Maciej Kula (legendary open-source recsys developer) provides an [excellent overview of the differences](https://resources.bibblio.org/hubfs/share/2018-01-24-RecSysLDN-Ravelin.pdf).
 
 Now let's import the library, initialize our model, and fit on the training data:
@@ -54,16 +54,15 @@ this will produce an array of real-valued model scores generated using the Facto
 
 Now let's generate our topN recommended movies for each user:
 ```python
-valid_recs = model.recommend_for_users(valid_users, n_items=10, filter_previous=True, cold_start='drop')
+valid_recs = model.recommend(valid_users, n_items=10, filter_previous=True, cold_start='drop')
 ```
 The input should be a `pd.Series`, `np.ndarray` or `list` of `user_id` values. You can use `filter_previous=True` to prevent generating recommendations that include any items observed by the user in the training data, which could be useful depending on your application context. The result will be a `pd.DataFrame` where `user_id` values will be the index and the rows will be each user's top recommended items in descending order (best item is in column 0):
-```
-|  |    0|    1|    2|    3|    4|    5|    6|    7|   8|    9|
-|--|-----|-----|-----|-----|-----|-----|-----|-----|----|-----|
-|3 | 2396| 1265|  357|   34| 2858| 3175|    1| 2028|  17|  356|
-|5 |  608| 1617| 1610| 3418|  590|  474|  858|  377| 924| 1036|
-|8 |  589| 1036| 2571| 2028| 2000| 1220| 1197|  110| 780| 1954|
-```
+
+|   |    0|    1|    2|    3|    4|    5|    6|    7|   8|    9|
+|---|-----|-----|-----|-----|-----|-----|-----|-----|----|-----|
+|3  | 2396| 1265|  357|   34| 2858| 3175|    1| 2028|  17|  356|
+|5  |  608| 1617| 1610| 3418|  590|  474|  858|  377| 924| 1036|
+|8  |  589| 1036| 2571| 2028| 2000| 1220| 1197|  110| 780| 1954|
 
 Now let's see how the model is performing wrt the included validation metrics evaluated on the hold-out data:
 ```python
@@ -100,7 +99,7 @@ model.similar_items(589, n_items=10)
 480                      Jurassic Park (1993)
 1200                            Aliens (1986)
 ```
-A lot of solid sci-fi/action here - I hope you like explosions...
+I hope you like explosions...
 
 ```python
 # Being John Malkovich (1999)

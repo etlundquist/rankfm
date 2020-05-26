@@ -2,9 +2,6 @@
 rankfm model tuning and evaluation functions
 """
 
-import os
-import sys
-
 import numpy as np
 import pandas as pd
 
@@ -28,7 +25,7 @@ def hit_rate(model, test_interactions, k=10, filter_previous=False):
     test_users = list(test_user_items.keys())
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # calculate the hit rate (percentage of users with any relevant recommendation) wrt common users
@@ -55,7 +52,7 @@ def reciprocal_rank(model, test_interactions, k=10, filter_previous=False):
     test_users = list(test_user_items.keys())
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # calculate the reciprocal rank (inverse rank of the first relevant recommended item) wrt common users
@@ -83,7 +80,7 @@ def discounted_cumulative_gain(model, test_interactions, k=10, filter_previous=F
     test_users = list(test_user_items.keys())
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # calculate the discounted cumulative gain (sum of inverse log scaled ranks of relevant items) wrt common users
@@ -111,7 +108,7 @@ def precision(model, test_interactions, k=10, filter_previous=False):
     test_users = list(test_user_items.keys())
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # calculate average precision wrt common users
@@ -138,7 +135,7 @@ def recall(model, test_interactions, k=10, filter_previous=False):
     test_users = list(test_user_items.keys())
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # calculate average recall across wrt common users
@@ -164,7 +161,7 @@ def diversity(model, test_interactions, k=10, filter_previous=False):
     test_users = test_user_items['user_id'].unique()
 
     # generate topK recommendations for all test users also present in the training data
-    test_recs = model.recommend_for_users(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
+    test_recs = model.recommend(users=test_users, n_items=k, filter_previous=filter_previous, cold_start='drop')
     comm_user = test_recs.index.values
 
     # stack the recommendations long-format for aggregation

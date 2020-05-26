@@ -2,15 +2,13 @@
 rankfm main modeling class
 """
 
-import os
-import sys
-import warnings
-
 import numpy as np
 import numba as nb
 import pandas as pd
 
-from rankfm.numba_methods import _fit, _predict, _recommend_for_users
+from rankfm.numba_methods import _fit, _predict, _recommend
+
+# import warnings
 # warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
 
 
@@ -135,6 +133,9 @@ class RankFM():
         :return: None
         """
 
+        # check user data inputs
+        assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
+
         # map the raw user/item identifiers to internal zero-based index positions
         # NOTE: any user/item pairs not found in the existing indexes will be dropped
 
@@ -201,17 +202,18 @@ class RankFM():
 
         # randomly initialize user feature factors if user features were supplied
         # NOTE: set all user feature factor weights to zero to prevent random scoring influence otherwise
-        if user_features is None:
-            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors]).astype(np.float32)
-        else:
+        if user_features is not None:
             self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
+        else:
+            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors]).astype(np.float32)
 
         # randomly initialize item feature factors if item features were supplied
         # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
-        if item_features is None:
-            self.v_if = np.zeros([self.x_if.shape[1], self.factors]).astype(np.float32)
-        else:
+        if item_features is not None:
             self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
+        else:
+            self.v_if = np.zeros([self.x_if.shape[1], self.factors]).astype(np.float32)
+
 
 
     # -------------------------------
@@ -245,12 +247,14 @@ class RankFM():
         :return: self
         """
 
+        # initialize necessary internal data structures
         if self.is_fit:
             self._init_interactions(interactions)
             self._init_features(user_features, item_features)
         else:
             self._init_all(interactions, user_features, item_features)
 
+        # call numba internals
         updated_weights = _fit(
             self.interactions,
             self.user_items_nb,
@@ -292,6 +296,7 @@ class RankFM():
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
 
+        # call numba internals
         pred_pairs = pred_pairs.to_numpy().astype(np.float32)
         scores = _predict(
             pred_pairs,
@@ -313,7 +318,7 @@ class RankFM():
             raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
 
 
-    def recommend_for_users(self, users, n_items=10, filter_previous=False, cold_start='nan'):
+    def recommend(self, users, n_items=10, filter_previous=False, cold_start='nan'):
         """calculate the topN items for each user
 
         :param users: list-like of user identifiers for which to generate recommendations
@@ -326,8 +331,9 @@ class RankFM():
         # ensure that the model has been fit before attempting to generate predictions
         assert self.is_fit, "you must fit the model prior to generating recommendations"
 
+        # call numba internals
         user_idx = pd.Series(users).map(self.user_to_index).to_numpy(dtype=np.float32)
-        rec_items = _recommend_for_users(
+        rec_items = _recommend(
             user_idx,
             self.user_items_nb,
             n_items,
