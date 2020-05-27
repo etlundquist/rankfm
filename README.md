@@ -1,5 +1,8 @@
 # RankFM
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
+
 RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses the Bayesian Personalized Ranking (BPR-OPT) optimization criteria described in [Rendle 2009](https://arxiv.org/pdf/1205.2618.pdf) to learn model weights via Stochastic Gradient Descent (SGD). It can also incorporate user and/or item auxiliary features to augment the main interaction data, which may increase model performance, especially in contexts where the interaction data is highly sparse but rich user and/or item metadata features exist.
 
 The core training/prediction/recommendation subroutines are converted to optimized machine code at runtime using the [Numba](http://numba.pydata.org/) LLVM JIT compiler. This makes it possible to scale model training and recommendation to millions of user/item interactions. Designed for ease-of-use, RankFM accepts both `pd.DataFrame` and `np.ndarray` inputs. You do not have to convert your data to `scipy.sparse` matrices or re-map user/item identifiers to array indexes prior to use - RankFM internally maps all user/item identifiers to zero-based integer indexes, but always converts its outputs back to the original user/item identifiers from your data, which can be arbitrary (non-zero-based, non-consecutive) integers or even strings.
