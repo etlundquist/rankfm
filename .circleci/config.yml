@@ -1,21 +1,26 @@
-version: 2.1
-
-orbs:
-  python: circleci/python@0.2.1
+version: 2
 
 jobs:
-  build-and-test:
-    executor: python/default
+  build:
+    docker:
+      - image: circleci/python:3.6.4
     steps:
       - checkout
-      - python/load-cache
-      - python/install-deps
-      - python/save-cache
+      - run: sudo chown -R circleci:circleci /usr/local/bin
+      - run: sudo chown -R circleci:circleci /usr/local/lib/python3.6/site-packages
+      - restore_cache:
+          key: deps-{{ .Branch }}-{{ checksum requirements.txt }}
       - run:
-          command: ./manage.py test
-          name: Test
+          command: |
+            sudo pip install -r requirements.txt
+            python setup.py install
+      - save_cache:
+          key: deps-{{ .Branch }}-{{ checksum requirements.txt }}
+          paths:
+            - /usr/local/bin
+            - /usr/local/lib/python3.6/site-packages
+      - run:
+          command: |
+            python -m pyflakes rankfm/
+            python -m pytest -r Efp tests/
 
-workflows:
-  main:
-    jobs:
-      - build-and-test
