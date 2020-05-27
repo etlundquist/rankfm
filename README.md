@@ -35,7 +35,7 @@ Let's first look at the required shape of the interaction data:
 | 5       | 377     |
 | 8       | 610     |
 
-It has just two columns: a `user_id` and an `item_id` (you can name these fields whatever you want or use a numpy array instead). Notice that there is no `rating` column - this library is for **implicit feedback** data (e.g. watches, page views, purchases, clicks) as opposed to **explicit feedback** data (e.g. 1-5 ratings, thumbs up/down). Implicit feedback is far more common in real-world recommendation contexts and doesn't suffer from the missing-not-at-random problem of pure explicit feedback approaches. Maciej Kula (legendary open-source recsys developer) provides an [excellent overview of the differences](https://resources.bibblio.org/hubfs/share/2018-01-24-RecSysLDN-Ravelin.pdf).
+It has just two columns: a `user_id` and an `item_id` (you can name these fields whatever you want or use a numpy array instead). Notice that there is no `rating` column - this library is for **implicit feedback** data (e.g. watches, page views, purchases, clicks) as opposed to **explicit feedback** data (e.g. 1-5 ratings, thumbs up/down). Implicit feedback is far more common in real-world recommendation contexts and doesn't suffer from the [missing-not-at-random problem](https://resources.bibblio.org/hubfs/share/2018-01-24-RecSysLDN-Ravelin.pdf) of pure explicit feedback approaches.
 
 Now let's import the library, initialize our model, and fit on the training data:
 ```python
