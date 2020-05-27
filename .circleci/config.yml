@@ -6,12 +6,15 @@ jobs:
       - image: circleci/python:3.6.4
     steps:
       - checkout
-      - run: sudo chown -R circleci:circleci /usr/local/bin
-      - run: sudo chown -R circleci:circleci /usr/local/lib/python3.6/site-packages
+      - run:
+          command: |
+            sudo chown -R circleci:circleci /usr/local/bin
+            sudo chown -R circleci:circleci /usr/local/lib/python3.6/site-packages
       - restore_cache:
           key: deps-{{ .Branch }}-{{ checksum "requirements.txt" }}
       - run:
           command: |
+            pip install --upgrade pip
             sudo pip install -r requirements.txt
             python setup.py install
       - save_cache:
