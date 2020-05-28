@@ -1,7 +1,7 @@
 # RankFM
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses the Bayesian Personalized Ranking (BPR-OPT) optimization criteria described in [Rendle 2009](https://arxiv.org/pdf/1205.2618.pdf) to learn model weights via Stochastic Gradient Descent (SGD). It can also incorporate user and/or item auxiliary features to augment the main interaction data, which may increase model performance, especially in contexts where the interaction data is highly sparse but rich user and/or item metadata features exist.
 
@@ -16,10 +16,11 @@ This package is currently under active development pre-release, and should not y
 * Python 3.6+
 * numpy >= 1.15
 * pandas >= 0.24
+* scipy >= 1.1
 * numba >= 0.49
 
 ### Installation
-The best way to use the package in development mode is to install directly from GitHub via `pip`:
+The best way to use the package in development mode is to install directly from GitHub via `pip`. It's recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure core C extensions and linear algebra libraries have been installed and configured correctly.
 ```
 pip install git+https://github.com/etlundquist/rankfm.git#egg=rankfm
 ```
