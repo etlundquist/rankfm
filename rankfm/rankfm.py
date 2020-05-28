@@ -100,7 +100,7 @@ class RankFM():
         """
 
         # save the unique lists of users/items in terms of original identifiers
-        interactions_df =  pd.DataFrame(interactions, columns=['user_id', 'item_id'])
+        interactions_df =  pd.DataFrame(interactions.values, columns=['user_id', 'item_id'])
         self.user_id = pd.Series(np.sort(np.unique(interactions_df['user_id'])))
         self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
@@ -139,7 +139,7 @@ class RankFM():
         # map the raw user/item identifiers to internal zero-based index positions
         # NOTE: any user/item pairs not found in the existing indexes will be dropped
 
-        self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
+        self.interactions = pd.DataFrame(interactions.values.copy(), columns=['user_id', 'item_id'])
         self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index).astype(np.int32)
         self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index).astype(np.int32)
         self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna().astype(np.int32)
@@ -289,7 +289,7 @@ class RankFM():
         assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
 
-        pred_pairs = pd.DataFrame(pairs.copy(), columns=['user_id', 'item_id'])
+        pred_pairs = pd.DataFrame(pairs.values.copy(), columns=['user_id', 'item_id'])
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
 
