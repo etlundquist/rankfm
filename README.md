@@ -1,5 +1,6 @@
 # RankFM
 
+[![PyPi](https://img.shields.io/badge/pypi-0.1.0-blue.svg)](https://pypi.python.org/pypi/rankfm/0.1.0)
 [![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
@@ -9,7 +10,7 @@ The core training/prediction/recommendation subroutines are converted to optimiz
 
 In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes the additional utilities `similiar_users()` and `similar_items()` to find the most similar users/items to a given user/item based on latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions have been included in the separate `evaluation` module to streamline model tuning and validation. See the **Quickstart** section below to get started, and the `quickstart.ipynb` notebook in the `/examples` folder for a more in-depth walkthrough.
 
-This package is currently under active development pre-release, and should not yet be considered stable. Release, build status, and PyPI information will be added once things get to a stable and satisfactory state for an initial release. The core functionality is mostly in place and working, but automated tests and CI workflows need to be added, and I need to teach myself how to do all that stuff first :)
+This package is currently under active development and should not yet be considered fully stable. The core functionality is in place and working, but has not yet been rigorously tested against a wide variety of real-world data sets, modeling objectives, edge cases, user errors, etc. If you do find a problem or have suggestions for improvement please let me know!
 
 ---
 ### Dependencies
@@ -20,10 +21,16 @@ This package is currently under active development pre-release, and should not y
 * numba >= 0.49
 
 ### Installation
-The best way to use the package in development mode is to install directly from GitHub via `pip`. It's recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure core C extensions and linear algebra libraries have been installed and configured correctly.
+
+You can install the latest published version from PyPI using `pip`:
+```
+pip install rankfm
+```
+Or alternatively install the current development build directly from GitHub:
 ```
 pip install git+https://github.com/etlundquist/rankfm.git#egg=rankfm
 ```
+It's highly recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure that all core numpy/scipy C extensions and linear algebra libraries have been installed and configured correctly. Anaconda: it just works.
 
 ### Quickstart
 Let's work through a simple example of fitting a model, generating recommendations, evaluating performance, and assessing some item-item similarities. The data we'll be using here may already be somewhat familiar: you know it, you love it, it's the [MovieLens 1M](https://grouplens.org/datasets/movielens/1m/)!
@@ -123,9 +130,8 @@ model.similar_items(2997, n_items=10)
 [Let's get weird...](https://www.youtube.com/watch?v=lIpev8JXJHQ&t=5s)
 
 ---
-That's all for now. To see more in-depth worked examples in jupyter notebook format head to the `/examples` folder. Be sure to check back for added functionality and PyPI release status in the near future as soon as I teach myself how to use CI workflows and go where few data scientists have gone before: a comprehensive set of unit tests. Stay tuned...
+That's all for now. To see more in-depth worked examples in jupyter notebook format head to the `/examples` folder. Be sure to check back for added functionality and updated PyPI releases in the near future. There's more to come - stay tuned...
 
 ---
 ![under construction](./images/UnderConstruction.png)
-
 
