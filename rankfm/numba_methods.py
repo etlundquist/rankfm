@@ -89,8 +89,6 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
     """
 
     # define matrix dimension shapes
-    P = x_uf.shape[1]
-    Q = x_if.shape[1]
     F = v_i.shape[1]
     I = len(item_idx)
 
