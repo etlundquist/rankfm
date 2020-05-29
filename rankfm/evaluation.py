@@ -4,7 +4,7 @@ rankfm model tuning and evaluation functions
 
 import numpy as np
 import pandas as pd
-
+from rankfm.utils import get_data
 
 def hit_rate(model, test_interactions, k=10, filter_previous=False):
     """evaluate hit-rate (any match) wrt out-of-sample observed interactions
@@ -20,7 +20,7 @@ def hit_rate(model, test_interactions, k=10, filter_previous=False):
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # transform interactions into a user -> items dictionary
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_user_items = test_user_items.groupby('user_id')['item_id'].apply(set).to_dict()
     test_users = list(test_user_items.keys())
 
@@ -47,7 +47,7 @@ def reciprocal_rank(model, test_interactions, k=10, filter_previous=False):
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # transform interactions into a user -> items dictionary
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_user_items = test_user_items.groupby('user_id')['item_id'].apply(set).to_dict()
     test_users = list(test_user_items.keys())
 
@@ -75,7 +75,7 @@ def discounted_cumulative_gain(model, test_interactions, k=10, filter_previous=F
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # transform interactions into a user -> items dictionary
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_user_items = test_user_items.groupby('user_id')['item_id'].apply(set).to_dict()
     test_users = list(test_user_items.keys())
 
@@ -103,7 +103,7 @@ def precision(model, test_interactions, k=10, filter_previous=False):
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # transform interactions into a user -> items dictionary
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_user_items = test_user_items.groupby('user_id')['item_id'].apply(set).to_dict()
     test_users = list(test_user_items.keys())
 
@@ -130,7 +130,7 @@ def recall(model, test_interactions, k=10, filter_previous=False):
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # transform interactions into a user -> items dictionary
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_user_items = test_user_items.groupby('user_id')['item_id'].apply(set).to_dict()
     test_users = list(test_user_items.keys())
 
@@ -157,7 +157,7 @@ def diversity(model, test_interactions, k=10, filter_previous=False):
     assert model.is_fit, "you must fit the model prior to evaluating hold-out metrics"
 
     # get the unique set of test users
-    test_user_items = pd.DataFrame(test_interactions, columns=['user_id', 'item_id'])
+    test_user_items = pd.DataFrame(get_data(test_interactions), columns=['user_id', 'item_id'])
     test_users = test_user_items['user_id'].unique()
 
     # generate topK recommendations for all test users also present in the training data

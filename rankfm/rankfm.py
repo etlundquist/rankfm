@@ -7,6 +7,7 @@ import numba as nb
 import pandas as pd
 
 from rankfm.numba_methods import _fit, _predict, _recommend
+from rankfm.utils import get_data
 
 # import warnings
 # warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
@@ -67,8 +68,11 @@ class RankFM():
         self.user_to_index = None
         self.item_to_index = None
 
-        # user/item interactions
+        # user/item interactions and sample importance weights
         self.interactions = None
+        self.sample_weight = None
+
+        # dictionary user observed items lookups
         self.user_items_py = None
         self.user_items_nb = None
 
@@ -90,17 +94,22 @@ class RankFM():
         self.is_fit = False
 
 
-    def _init_all(self, interactions, user_features=None, item_features=None):
+    def _init_all(self, interactions, user_features=None, item_features=None, sample_weight=None):
         """index the raw interaction and user/item features data to numpy arrays
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
         :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param sample_weight: vector of importance weights for each observed interaction
         :return: None
         """
 
+        # check user data inputs
+        assert isinstance(interactions, (np.ndarray, pd.DataFrame)), "[interactions] must be np.ndarray or pd.dataframe"
+        assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
+
         # save the unique lists of users/items in terms of original identifiers
-        interactions_df =  pd.DataFrame(interactions, columns=['user_id', 'item_id'])
+        interactions_df =  pd.DataFrame(get_data(interactions), columns=['user_id', 'item_id'])
         self.user_id = pd.Series(np.sort(np.unique(interactions_df['user_id'])))
         self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
@@ -117,7 +126,7 @@ class RankFM():
         self.item_idx = np.arange(len(self.item_id), dtype=np.int32)
 
         # map the interactions to internal index positions
-        self._init_interactions(interactions)
+        self._init_interactions(interactions, sample_weight)
 
         # map the user/item features to internal index positions
         self._init_features(user_features, item_features)
@@ -126,23 +135,34 @@ class RankFM():
         self._init_weights(user_features, item_features)
 
 
-    def _init_interactions(self, interactions):
+    def _init_interactions(self, interactions, sample_weight):
         """map new interaction data to existing internal user/item indexes
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
+        :param sample_weight: vector of importance weights for each observed interaction
         :return: None
         """
 
         # check user data inputs
+        assert isinstance(interactions, (np.ndarray, pd.DataFrame)), "[interactions] must be np.ndarray or pd.dataframe"
         assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
 
         # map the raw user/item identifiers to internal zero-based index positions
         # NOTE: any user/item pairs not found in the existing indexes will be dropped
 
-        self.interactions = pd.DataFrame(interactions.copy(), columns=['user_id', 'item_id'])
+        self.interactions = pd.DataFrame(get_data(interactions).copy(), columns=['user_id', 'item_id'])
         self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index).astype(np.int32)
         self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index).astype(np.int32)
         self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna().astype(np.int32)
+
+        # store the sample weights internally or create a vector of ones if not passed
+        if sample_weight is not None:
+            assert isinstance(sample_weight, (np.ndarray, pd.Series)), "[sample_weight] must be np.ndarray or pd.series"
+            assert sample_weight.ndim == 1, "[sample_weight] must a vector (ndim=1)"
+            assert len(sample_weight) == len(interactions), "[sample_weight] must have the same length as [interactions]"
+            self.sample_weight = get_data(sample_weight).astype(np.float32)
+        else:
+            self.sample_weight = np.ones(len(self.interactions), dtype=np.float32, order='C')
 
         # create python/numba lookup dictionaries containing the set of observed items for each user
         # NOTE: the typed numba dictionary will be used to sample unobserved items during training
@@ -174,7 +194,7 @@ class RankFM():
             else:
                 raise KeyError('the users in [user_features] do not match the users in [interactions]')
         else:
-            self.x_uf = np.zeros([len(self.user_idx), 1]).astype(np.float32)
+            self.x_uf = np.zeros([len(self.user_idx), 1], dtype=np.float32, order='C')
 
         # store the item features as a ndarray [IxQ] row-ordered by item index position
         if item_features is not None:
@@ -186,7 +206,7 @@ class RankFM():
             else:
                 raise KeyError('the items in [item_features] do not match the items in [interactions]')
         else:
-            self.x_if = np.zeros([len(self.item_idx), 1]).astype(np.float32)
+            self.x_if = np.zeros([len(self.item_idx), 1], dtype=np.float32, order='C')
 
 
     def _init_weights(self, user_features, item_features):
@@ -205,14 +225,14 @@ class RankFM():
         if user_features is not None:
             self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors]).astype(np.float32)
+            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors], dtype=np.float32, order='C')
 
         # randomly initialize item feature factors if item features were supplied
         # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
         if item_features is not None:
             self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_if = np.zeros([self.x_if.shape[1], self.factors]).astype(np.float32)
+            self.v_if = np.zeros([self.x_if.shape[1], self.factors], dtype=np.float32, order='C')
 
 
 
@@ -221,40 +241,43 @@ class RankFM():
     # -------------------------------
 
 
-    def fit(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
+    def fit(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, verbose=False):
         """clear previous model state and learn new model weights using the input data
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
         :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param sample_weight: vector of importance weights for each observed interaction
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
         """
 
         self._reset_state()
-        self.fit_partial(interactions, user_features, item_features, epochs, verbose)
+        self.fit_partial(interactions, user_features, item_features, sample_weight, epochs, verbose)
 
 
-    def fit_partial(self, interactions, user_features=None, item_features=None, epochs=1, verbose=False):
+    def fit_partial(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, verbose=False):
         """learn or update model weights using the input data and resuming from the current model state
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
         :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param sample_weight: vector of importance weights for each observed interaction
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
         """
 
         if self.is_fit:
-            self._init_interactions(interactions)
+            self._init_interactions(interactions, sample_weight)
             self._init_features(user_features, item_features)
         else:
-            self._init_all(interactions, user_features, item_features)
+            self._init_all(interactions, user_features, item_features, sample_weight)
 
         updated_weights = _fit(
             self.interactions,
+            self.sample_weight,
             self.user_items_nb,
             self.item_idx,
             self.regularization,
@@ -286,10 +309,12 @@ class RankFM():
         :return: np.array of real-valued model scores
         """
 
+         # check user data inputs
+        assert isinstance(pairs, (np.ndarray, pd.DataFrame)), "[pairs] must be np.ndarray or pd.dataframe"
         assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
 
-        pred_pairs = pd.DataFrame(pairs.copy(), columns=['user_id', 'item_id'])
+        pred_pairs = pd.DataFrame(get_data(pairs).copy(), columns=['user_id', 'item_id'])
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
 
