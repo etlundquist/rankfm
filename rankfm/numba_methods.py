@@ -67,6 +67,9 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
     F = v_i.shape[1]
     I = len(item_idx)
 
+    # define shuffle index to randomly permute each epoch
+    shuffle_index = np.arange(len(interactions))
+
     for epoch in range(epochs):
 
         # set the new learning rate (eta) for this epoch
@@ -77,13 +80,10 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
         else:
             raise ValueError('unknown [learning_schedule]')
 
-        # randomly re-shuffle the observed interactions to diversify training epochs
-        shuffle_index = np.arange(len(interactions))
-        np.random.shuffle(shuffle_index)
-        interactions = interactions[shuffle_index]
         log_likelihood = 0.0
+        np.random.shuffle(shuffle_index)
 
-        for row in range(len(interactions)):
+        for row in shuffle_index:
 
             # locate the user (u) and observed item (i)
             u = interactions[row, 0]
