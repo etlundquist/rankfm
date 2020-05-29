@@ -88,16 +88,18 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
     """
 
-    # define matrix dimension shapes and shuffle index
+    # define matrix dimension shapes
     P = x_uf.shape[1]
     Q = x_if.shape[1]
     F = v_i.shape[1]
     I = len(item_idx)
-    shuffle_index = np.arange(len(interactions))
+
+    # create a shuffle index to diversify each training epoch
+    n_interaction = len(interactions)
+    shuffle_index = np.arange(n_interaction)
 
     for epoch in range(epochs):
 
-        # set the new learning rate (eta) for this epoch
         if learning_schedule == 'constant':
             eta = learning_rate
         elif learning_schedule == 'invscaling':
@@ -105,10 +107,12 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
         else:
             raise ValueError('unknown [learning_schedule]')
 
-        log_likelihood = 0.0
         np.random.shuffle(shuffle_index)
+        interactions = interactions[shuffle_index]
+        sample_weight = sample_weight[shuffle_index]
+        log_likelihood = 0.0
 
-        for row in shuffle_index:
+        for row in range(n_interaction):
 
             # locate the user (u), observed item (i), and sample weight (sw)
             u = interactions[row, 0]
@@ -121,8 +125,6 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
                 if not isin_1(j, user_items[u]):
                     break
 
-            # calculate the pairwise utility score for the (u, i, j) triplet
-
             pu_i = w_i[i] - w_i[j]
             pu_if = np.dot(x_if[i] - x_if[j], w_if)
             pu_u_i = np.dot(v_i[i] - v_i[j], v_u[u])
@@ -130,48 +132,48 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
             pu_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
             pu_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
 
+            # calculate the pairwise utility score for the (u, i, j) triplet and its associated log-likelihood
             pairwise_utility = pu_i + pu_if + pu_u_i + pu_u_if + pu_i_uf + pu_uf_if
             log_likelihood += np.log(1 / (1 + np.exp(-pairwise_utility)))
 
-            # calculate derivatives of the model penalized log-likelihood function
-            # NOTE: apply the sample weights to d_LL/d_g(pu) to scale the magnitude of the gradient step updates
-            # NOTE: sample weights are applied like frequency weights: gradient updates are scaled as if there were W (u, i, j) pairs
+            # calculate derivatives of the penalized log-likelihood function wrt to all model weights
+            # NOTE: sample weights are applied like frequency weights: gradient updates are scaled up/down as if there were W identical (u, i, j) pairs
 
+            # calculate the outer-derivative [d_LL/d_g(pu)] and regularization derivative [d_LL/d_norm(theta)]
             d_con = 1.0 / (np.exp(pairwise_utility) + 1.0)
             d_reg = 2.0 * regularization
 
+            # calculate the [item] and [user/item factor] derivatives
             d_w_i = 1.0
             d_w_j = -1.0
-            d_w_if = x_if[i] - x_if[j]
-
             d_v_u = v_i[i] - v_i[j] + np.dot(v_if.T, x_if[i] - x_if[j])
             d_v_i = v_u[u] + np.dot(v_uf.T, x_uf[u])
             d_v_j = -v_u[u] - np.dot(v_uf.T, x_uf[u])
 
-            d_v_uf = np.empty((P, F), np.float32)
-            d_v_if = np.empty((Q, F), np.float32)
+            # update the [item] and [user/item factor] weights with a gradient step
+            w_i[i] += eta * (sw * (d_con * d_w_i) - (d_reg * w_i[i]))
+            w_i[j] += eta * (sw * (d_con * d_w_j) - (d_reg * w_i[j]))
+            v_u[u] += eta * (sw * (d_con * d_v_u) - (d_reg * v_u[u]))
+            v_i[i] += eta * (sw * (d_con * d_v_i) - (d_reg * v_i[i]))
+            v_i[j] += eta * (sw * (d_con * d_v_j) - (d_reg * v_i[j]))
 
-            for f in range(F):
-                for p in range(P):
-                    if (x_uf[u][p]) == 0.0:
-                        d_v_uf[p, f] = 0.0
-                    else:
-                        d_v_uf[p, f] = (x_uf[u][p]) * (v_i[i][f] - v_i[j][f] + np.dot(v_if.T[f], x_if[i] - x_if[j]))
-                for q in range(Q):
-                    if (x_if[i][q] - x_if[j][q]) == 0.0:
-                        d_v_if[q, f] = 0.0
-                    else:
-                        d_v_if[q, f] = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
+            # get the non-zero indices of user/item features for this (u, i, j) triplet
+            x_uf_nz = np.nonzero(x_uf[u])[0]
+            x_if_nz = np.nonzero(x_if[i] - x_if[j])[0]
 
-            # update model weights for this (u, i, j) triplet with a gradient step
-            w_i[i] += eta * (sw * (d_con * d_w_i)  - (d_reg * w_i[i]))
-            w_i[j] += eta * (sw * (d_con * d_w_j)  - (d_reg * w_i[j]))
-            w_if   += eta * (sw * (d_con * d_w_if) - (d_reg * w_if))
-            v_u[u] += eta * (sw * (d_con * d_v_u)  - (d_reg * v_u[u]))
-            v_i[i] += eta * (sw * (d_con * d_v_i)  - (d_reg * v_i[i]))
-            v_i[j] += eta * (sw * (d_con * d_v_j)  - (d_reg * v_i[j]))
-            v_uf   += eta * (sw * (d_con * d_v_uf) - (d_reg * v_uf))
-            v_if   += eta * (sw * (d_con * d_v_if) - (d_reg * v_if))
+            # update [user-feature-factor] weights for the non-zero user features
+            for p in x_uf_nz:
+                for f in range(F):
+                    d_v_uf = (x_uf[u][p]) * (v_i[i][f] - v_i[j][f] + np.dot(v_if.T[f], x_if[i] - x_if[j]))
+                    v_uf[p, f] += eta * (sw * (d_con * d_v_uf) - (d_reg * v_uf[p, f]))
+
+            # update [item-feature] and [item-feature-factor] weights for the non-zero item features
+            for q in x_if_nz:
+                d_w_if = x_if[i][q] - x_if[j][q]
+                w_if[q] += eta * (sw * (d_con * d_w_if) - (d_reg * w_if[q]))
+                for f in range(F):
+                    d_v_if = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
+                    v_if[q, f] += eta * (sw * (d_con * d_v_if) - (d_reg * v_if[q, f]))
 
         # assert all model weights are finite as of the end of this epoch
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
