@@ -46,10 +46,37 @@ def isin_2(item, items):
 
 
 @nb.njit
-def _fit(interactions, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
+def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
+    """assert all model weights are finite"""
+
+    assert np.isfinite(np.sum(w_i)), "item weights [w_i] are not finite - try decreasing feature/sample_weight magnitudes"
+    assert np.isfinite(np.sum(w_if)), "item feature weights [w_if] are not finite - try decreasing feature/sample_weight magnitudes"
+    assert np.isfinite(np.sum(v_u)), "user factors [v_u] are not finite - try decreasing feature/sample_weight magnitudes"
+    assert np.isfinite(np.sum(v_i)), "item factors [v_i] are not finite - try decreasing feature/sample_weight magnitudes"
+    assert np.isfinite(np.sum(v_uf)), "user-feature factors [v_uf] are not finite - try decreasing feature/sample_weight magnitudes"
+    assert np.isfinite(np.sum(v_if)), "item-feature factors [v_if] are not finite - try decreasing feature/sample_weight magnitudes"
+
+
+@nb.njit
+def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
+    """calculate the total regularization penalty for all model weights"""
+
+    penalty = 0.0
+    penalty += np.sum(regularization * np.square(w_i))
+    penalty += np.sum(regularization * np.square(w_if))
+    penalty += np.sum(regularization * np.square(v_u))
+    penalty += np.sum(regularization * np.square(v_i))
+    penalty += np.sum(regularization * np.square(v_uf))
+    penalty += np.sum(regularization * np.square(v_if))
+    return penalty
+
+
+@nb.njit
+def _fit(interactions, sample_weight, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """private JIT model-fitting function
 
     :param interactions: np.array[int32] of observed [user_idx, item_idx] iteractions
+    :param sample_weight: vector of importance weights for each observed interaction
     :param user_items: typed dict [int32 -> int32[:]] mapping user_idx to set of observed item_idx
     :param item_idx: np.array[int32] of unique item_idx values found in interactions data
     :param regularization: L2 regularization penalty
@@ -61,13 +88,11 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
     """
 
-    # define matrix dimension shapes
+    # define matrix dimension shapes and shuffle index
     P = x_uf.shape[1]
     Q = x_if.shape[1]
     F = v_i.shape[1]
     I = len(item_idx)
-
-    # define shuffle index to randomly permute each epoch
     shuffle_index = np.arange(len(interactions))
 
     for epoch in range(epochs):
@@ -85,9 +110,10 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
 
         for row in shuffle_index:
 
-            # locate the user (u) and observed item (i)
+            # locate the user (u), observed item (i), and sample weight (sw)
             u = interactions[row, 0]
             i = interactions[row, 1]
+            sw = sample_weight[row]
 
             # randomly sample an unobserved item (j) for the user
             while True:
@@ -108,6 +134,8 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
             log_likelihood += np.log(1 / (1 + np.exp(-pairwise_utility)))
 
             # calculate derivatives of the model penalized log-likelihood function
+            # NOTE: apply the sample weights to d_LL/d_g(pu) to scale the magnitude of the gradient step updates
+            # NOTE: sample weights are applied like frequency weights: gradient updates are scaled as if there were W (u, i, j) pairs
 
             d_con = 1.0 / (np.exp(pairwise_utility) + 1.0)
             d_reg = 2.0 * regularization
@@ -136,25 +164,20 @@ def _fit(interactions, user_items, item_idx, regularization, learning_rate, lear
                         d_v_if[q, f] = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
 
             # update model weights for this (u, i, j) triplet with a gradient step
-            w_i[i] += eta * ((d_con * d_w_i)  - (d_reg * w_i[i]))
-            w_i[j] += eta * ((d_con * d_w_j)  - (d_reg * w_i[j]))
-            w_if   += eta * ((d_con * d_w_if) - (d_reg * w_if))
-            v_u[u] += eta * ((d_con * d_v_u)  - (d_reg * v_u[u]))
-            v_i[i] += eta * ((d_con * d_v_i)  - (d_reg * v_i[i]))
-            v_i[j] += eta * ((d_con * d_v_j)  - (d_reg * v_i[j]))
-            v_uf   += eta * ((d_con * d_v_uf) - (d_reg * v_uf))
-            v_if   += eta * ((d_con * d_v_if) - (d_reg * v_if))
+            w_i[i] += eta * (sw * (d_con * d_w_i)  - (d_reg * w_i[i]))
+            w_i[j] += eta * (sw * (d_con * d_w_j)  - (d_reg * w_i[j]))
+            w_if   += eta * (sw * (d_con * d_w_if) - (d_reg * w_if))
+            v_u[u] += eta * (sw * (d_con * d_v_u)  - (d_reg * v_u[u]))
+            v_i[i] += eta * (sw * (d_con * d_v_i)  - (d_reg * v_i[i]))
+            v_i[j] += eta * (sw * (d_con * d_v_j)  - (d_reg * v_i[j]))
+            v_uf   += eta * (sw * (d_con * d_v_uf) - (d_reg * v_uf))
+            v_if   += eta * (sw * (d_con * d_v_if) - (d_reg * v_if))
 
-        # calculate the cumulative penalized log-likelihood for this training epoch
-        penalty = 0.0
-        penalty += np.sum(regularization * np.square(w_i))
-        penalty += np.sum(regularization * np.square(w_if))
-        penalty += np.sum(regularization * np.square(v_u))
-        penalty += np.sum(regularization * np.square(v_i))
-        penalty += np.sum(regularization * np.square(v_uf))
-        penalty += np.sum(regularization * np.square(v_if))
+        # assert all model weights are finite as of the end of this epoch
+        assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
 
         if verbose:
+            penalty = reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if)
             log_likelihood = round(log_likelihood - penalty, 2)
             print("\ntraining epoch:", epoch)
             print("log likelihood:", log_likelihood)

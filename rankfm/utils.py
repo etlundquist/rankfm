@@ -9,10 +9,10 @@ def get_data(obj):
     :return: the object's underlying np.ndarray data
     """
 
-    if obj.__class__.__name__ == 'DataFrame':
+    if obj.__class__.__name__ in ('DataFrame', 'Series'):
         data = obj.values
     elif obj.__class__.__name__ == 'ndarray':
         data = obj
     else:
-        raise TypeError("input data must be in either pd.dataframe or np.ndarray format")
+        raise TypeError("input data must be in either pd.dataframe/pd.series or np.ndarray format")
     return data
