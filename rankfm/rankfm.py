@@ -16,10 +16,12 @@ from rankfm.utils import get_data
 class RankFM():
     """Factorization Machines for Ranking Problems with Implicit Feedback Data"""
 
-    def __init__(self, factors=10, regularization=0.01, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
+    def __init__(self, factors=10, loss='bpr', max_samples=10, regularization=0.01, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
         """store hyperparameters and initialize internal data
 
         :param factors: latent factor rank
+        :param loss: optimization/loss function to use for training: ['bpr', 'warp']
+        :param max_samples: maximum number of negative samples to draw for WARP loss
         :param regularization: L2 regularization penalty on model weights
         :param sigma: standard deviation to use for random initialization of factor weights
         :param learning_rate: initial learning rate for gradient step updates
@@ -30,6 +32,8 @@ class RankFM():
 
         # validate user inputs
         assert isinstance(factors, int) and factors >= 1, "[factors] must be a positive integer"
+        assert isinstance(loss, str) and loss in ('bpr', 'warp'), "[loss] must be in ('bpr', 'warp')"
+        assert isinstance(max_samples, int) and max_samples > 0, "[max_samples] must be a positive integer"
         assert isinstance(regularization, float) and regularization >= 0.0, "[regularization] must be a non-negative float"
         assert isinstance(sigma, float) and sigma > 0.0, "[sigma] must be a positive float"
         assert isinstance(learning_rate, float) and learning_rate > 0.0, "[learning_rate] must be a positive float"
@@ -38,6 +42,8 @@ class RankFM():
 
         # store hyperparameters
         self.factors = factors
+        self.loss = loss
+        self.max_samples = max_samples
         self.regularization = regularization
         self.sigma = sigma
         self.learning_rate = learning_rate
@@ -276,6 +282,8 @@ class RankFM():
             self._init_all(interactions, user_features, item_features, sample_weight)
 
         updated_weights = _fit(
+            self.loss,
+            self.max_samples,
             self.interactions,
             self.sample_weight,
             self.user_items_nb,

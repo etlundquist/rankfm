@@ -72,9 +72,11 @@ def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
 
 
 @nb.njit
-def _fit(interactions, sample_weight, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
+def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """private JIT model-fitting function
 
+    :param loss: loss/optimization function to use for training
+    :param max_samples: maximum number of negative samples to draw for WARP loss
     :param interactions: np.array[int32] of observed [user_idx, item_idx] iteractions
     :param sample_weight: vector of importance weights for each observed interaction
     :param user_items: typed dict [int32 -> int32[:]] mapping user_idx to set of observed item_idx
@@ -88,6 +90,9 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
     """
 
+    # define the margin for pairwise utility ranking errors
+    MARGIN = 1
+
     # define matrix dimension shapes
     F = v_i.shape[1]
     I = len(item_idx)
@@ -95,6 +100,15 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
     # create a shuffle index to diversify each training epoch
     n_interaction = len(interactions)
     shuffle_index = np.arange(n_interaction)
+
+    # determine the number of negative samples to draw depending on the loss function
+    # NOTE: if [loss == 'bpr'] -> [max_samples == 1] and [multiplier ~= 1] for all updates
+    # NOTE: the [multiplier] is scaled by total number of items so it's always [0, 1]
+
+    if loss == 'bpr':
+        max_samples = 1
+
+    # start the main training epoch loop
 
     for epoch in range(epochs):
 
@@ -117,21 +131,41 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
             i = interactions[row, 1]
             sw = sample_weight[row]
 
-            # randomly sample an unobserved item (j) for the user
-            while True:
-                j = int(I * random.random())
-                if not isin_1(j, user_items[u]):
+            # record the index and the pairwise utility of the worst rank reversal
+            min_index = -1
+            min_pairwise_utility = 1e6
+
+            # start the WARP sampling loop for this (u, i) pair
+            for sampled in range(1, max_samples + 1):
+
+                # randomly sample an unobserved item (j) for the user
+                while True:
+                    j = int(I * random.random())
+                    if not isin_1(j, user_items[u]):
+                        break
+
+                # calculate the pairwise utility score for the (u, i, j) triplet
+                pu_i = w_i[i] - w_i[j]
+                pu_if = np.dot(x_if[i] - x_if[j], w_if)
+                pu_u_i = np.dot(v_i[i] - v_i[j], v_u[u])
+                pu_u_if = np.dot(x_if[i] - x_if[j], np.dot(v_if, v_u[u]))
+                pu_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
+                pu_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
+                pairwise_utility = pu_i + pu_if + pu_u_i + pu_u_if + pu_i_uf + pu_uf_if
+
+                # check to see if this (u, i, j) triple has the worst rank reversal seen so far
+                if pairwise_utility < min_pairwise_utility:
+                    min_index = j
+                    min_pairwise_utility = pairwise_utility
+
+                # check to see if this (u, i, j) triple violates the pairwise utility margin
+                if pairwise_utility < MARGIN:
                     break
 
-            pu_i = w_i[i] - w_i[j]
-            pu_if = np.dot(x_if[i] - x_if[j], w_if)
-            pu_u_i = np.dot(v_i[i] - v_i[j], v_u[u])
-            pu_u_if = np.dot(x_if[i] - x_if[j], np.dot(v_if, v_u[u]))
-            pu_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
-            pu_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
-
-            # calculate the pairwise utility score for the (u, i, j) triplet and its associated log-likelihood
-            pairwise_utility = pu_i + pu_if + pu_u_i + pu_u_if + pu_i_uf + pu_uf_if
+            # set the final sampled negative item index and calculate the WARP multiplier
+            j = min_index
+            pairwise_utility = min_pairwise_utility
+            multiplier = np.log((I - 1) / sampled) / np.log(I)
             log_likelihood += np.log(1 / (1 + np.exp(-pairwise_utility)))
 
             # calculate derivatives of the penalized log-likelihood function wrt to all model weights
@@ -149,11 +183,11 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
             d_v_j = -v_u[u] - np.dot(v_uf.T, x_uf[u])
 
             # update the [item] and [user/item factor] weights with a gradient step
-            w_i[i] += eta * (sw * (d_con * d_w_i) - (d_reg * w_i[i]))
-            w_i[j] += eta * (sw * (d_con * d_w_j) - (d_reg * w_i[j]))
-            v_u[u] += eta * (sw * (d_con * d_v_u) - (d_reg * v_u[u]))
-            v_i[i] += eta * (sw * (d_con * d_v_i) - (d_reg * v_i[i]))
-            v_i[j] += eta * (sw * (d_con * d_v_j) - (d_reg * v_i[j]))
+            w_i[i] += eta * (sw * multiplier * (d_con * d_w_i) - (d_reg * w_i[i]))
+            w_i[j] += eta * (sw * multiplier * (d_con * d_w_j) - (d_reg * w_i[j]))
+            v_u[u] += eta * (sw * multiplier * (d_con * d_v_u) - (d_reg * v_u[u]))
+            v_i[i] += eta * (sw * multiplier * (d_con * d_v_i) - (d_reg * v_i[i]))
+            v_i[j] += eta * (sw * multiplier * (d_con * d_v_j) - (d_reg * v_i[j]))
 
             # get the non-zero indices of user/item features for this (u, i, j) triplet
             x_uf_nz = np.nonzero(x_uf[u])[0]
@@ -163,15 +197,15 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
             for p in x_uf_nz:
                 for f in range(F):
                     d_v_uf = (x_uf[u][p]) * (v_i[i][f] - v_i[j][f] + np.dot(v_if.T[f], x_if[i] - x_if[j]))
-                    v_uf[p, f] += eta * (sw * (d_con * d_v_uf) - (d_reg * v_uf[p, f]))
+                    v_uf[p, f] += eta * (sw * multiplier * (d_con * d_v_uf) - (d_reg * v_uf[p, f]))
 
             # update [item-feature] and [item-feature-factor] weights for the non-zero item features
             for q in x_if_nz:
                 d_w_if = x_if[i][q] - x_if[j][q]
-                w_if[q] += eta * (sw * (d_con * d_w_if) - (d_reg * w_if[q]))
+                w_if[q] += eta * (sw * multiplier * (d_con * d_w_if) - (d_reg * w_if[q]))
                 for f in range(F):
                     d_v_if = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
-                    v_if[q, f] += eta * (sw * (d_con * d_v_if) - (d_reg * v_if[q, f]))
+                    v_if[q, f] += eta * (sw * multiplier * (d_con * d_v_if) - (d_reg * v_if[q, f]))
 
         # assert all model weights are finite as of the end of this epoch
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
