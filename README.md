@@ -1,14 +1,14 @@
 # RankFM
 
-[![PyPi](https://img.shields.io/badge/pypi-0.1.0-blue.svg)](https://pypi.python.org/pypi/rankfm/0.1.0)
+[![PyPI version](https://badge.fury.io/py/rankfm.svg)](https://badge.fury.io/py/rankfm)
 [![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses the Bayesian Personalized Ranking (BPR-OPT) optimization criteria described in [Rendle 2009](https://arxiv.org/pdf/1205.2618.pdf) to learn model weights via Stochastic Gradient Descent (SGD). It can also incorporate user and/or item auxiliary features to augment the main interaction data, which may increase model performance, especially in contexts where the interaction data is highly sparse but rich user and/or item metadata features exist.
+RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses [Bayesian Personalized Ranking (BPR)](https://arxiv.org/pdf/1205.2618.pdf) and a variant of [Weighted Approximate-Rank Pairwise (WARP)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.587.3946&rep=rep1&type=pdf) loss functions to learn model weights via Stochastic Gradient Descent (SGD). It can (optionally) incorporate individual sample weights and/or user/item auxiliary features to augment the main user/item interaction data for training.
 
 The core training/prediction/recommendation subroutines are converted to optimized machine code at runtime using the [Numba](http://numba.pydata.org/) LLVM JIT compiler. This makes it possible to scale model training and recommendation to millions of user/item interactions. Designed for ease-of-use, RankFM accepts both `pd.DataFrame` and `np.ndarray` inputs. You do not have to convert your data to `scipy.sparse` matrices or re-map user/item identifiers to array indexes prior to use - RankFM internally maps all user/item identifiers to zero-based integer indexes, but always converts its outputs back to the original user/item identifiers from your data, which can be arbitrary (non-zero-based, non-consecutive) integers or even strings.
 
-In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes the additional utilities `similiar_users()` and `similar_items()` to find the most similar users/items to a given user/item based on latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions have been included in the separate `evaluation` module to streamline model tuning and validation. See the **Quickstart** section below to get started, and the `quickstart.ipynb` notebook in the `/examples` folder for a more in-depth walkthrough.
+In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes the additional utilities `similiar_users()` and `similar_items()` to find the most similar users/items to a given user/item based on latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions have been included in the separate `evaluation` module to streamline model tuning and validation. See the **Quickstart** section below to get started, and then the `/examples` folder for more in-depth walkthroughs using several popular open-source data sets in jupyter notebook format.
 
 This package is currently under active development and should not yet be considered fully stable. The core functionality is in place and working, but has not yet been rigorously tested against a wide variety of real-world data sets, modeling objectives, edge cases, user errors, etc. If you do find a problem or have suggestions for improvement please let me know!
 
@@ -49,11 +49,11 @@ Now let's import the library, initialize our model, and fit on the training data
 ```python
 from rankfm.rankfm import RankFM
 
-model = RankFM(factors=10, regularization=0.01, learning_rate=0.1, learning_schedule='constant')
+model = RankFM(factors=10, loss='bpr', regularization=0.01, learning_rate=0.10, learning_schedule='constant')
 model.fit(interactions_train, epochs=20, verbose=True)
 # NOTE: this takes about 90 seconds for 750,000 interactions on my 2.3 GHz i5 8GB RAM MacBook
 ```
-If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training performance by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the `regularization`. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time.
+If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training performance by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the `regularization`. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time. This example uses `BPR` loss which trains faster, but often `WARP` loss yields superior model performance.
 
 Now let's generate some user-item model scores from the validation data:
 ```python
