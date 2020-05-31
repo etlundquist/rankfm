@@ -394,7 +394,7 @@ class RankFM():
         """
 
         # ensure that the model has been fit before attempting to generate predictions
-        assert item_id in self.item_id, "you must select an [item_id] present in the training data"
+        assert item_id in self.item_id.values, "you must select an [item_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
         try:
@@ -421,7 +421,7 @@ class RankFM():
         """
 
         # ensure that the model has been fit before attempting to generate predictions
-        assert user_id in self.user_id, "you must select an [user_id] present in the training data"
+        assert user_id in self.user_id.values, "you must select an [user_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
         try:

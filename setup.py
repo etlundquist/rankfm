@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='rankfm',
-    version='0.1.2',
+    version='0.1.3',
     description='a python implementation of the generic factorization machines model class '
                 'adapted for collaborative filtering recommendation problems '
                 'with implicit feedback user-item interaction data '
