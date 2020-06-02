@@ -1,6 +1,7 @@
 # exclude data and private notebooks
 data/
 examples/ignore/
+cython/
 
 # system files
 *.DS_Store
