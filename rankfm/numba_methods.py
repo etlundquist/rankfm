@@ -10,7 +10,7 @@ import numpy as np
 import numba as nb
 
 
-@nb.njit
+@nb.njit(cache=True)
 def isin_1(item, items):
     """linear search for a given item in a sorted array"""
 
@@ -20,7 +20,7 @@ def isin_1(item, items):
     return False
 
 
-@nb.njit
+@nb.njit(cache=True)
 def isin_2(item, items):
     """binary search for a given item in a sorted array"""
 
@@ -45,7 +45,7 @@ def isin_2(item, items):
         md = int((lo + hi) / 2)
 
 
-@nb.njit
+@nb.njit(cache=True)
 def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
     """assert all model weights are finite"""
 
@@ -57,7 +57,7 @@ def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
     assert np.isfinite(np.sum(v_if)), "item-feature factors [v_if] are not finite - try decreasing feature/sample_weight magnitudes"
 
 
-@nb.njit
+@nb.njit(cache=True)
 def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
     """calculate the total regularization penalty for all model weights"""
 
@@ -71,12 +71,10 @@ def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
     return penalty
 
 
-@nb.njit
-def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
+@nb.njit(cache=True)
+def _fit(interactions, sample_weight, user_items, item_idx, regularization, learning_rate, learning_schedule, learning_exponent, max_samples, epochs, verbose, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """private JIT model-fitting function
 
-    :param loss: loss/optimization function to use for training
-    :param max_samples: maximum number of negative samples to draw for WARP loss
     :param interactions: np.array[int32] of observed [user_idx, item_idx] iteractions
     :param sample_weight: vector of importance weights for each observed interaction
     :param user_items: typed dict [int32 -> int32[:]] mapping user_idx to set of observed item_idx
@@ -85,6 +83,7 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
     :param learning_rate: SGD weight update learning rate
     :param learning_schedule: tag for adjusting the learning rate as a function of training epoch
     :param learning_exponent: exponent used to calculate the inverse scaling factor
+    :param max_samples: maximum number of negative samples to draw for WARP loss
     :param epochs: number of training epochs (full passes through observed interactions)
     :param verbose: whether to print training epoch and penalized log-likelihood to console
     :return: updated model weights (w_i, w_if, v_u, v_i, v_uf, v_if)
@@ -95,18 +94,15 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
 
     # define matrix dimension shapes
     F = v_i.shape[1]
-    I = len(item_idx)
+    I = item_idx.shape[0]
+
+    # determine whether user and/or item features were supplied
+    x_uf_any = x_uf.any()
+    x_if_any = x_if.any()
 
     # create a shuffle index to diversify each training epoch
     n_interaction = len(interactions)
     shuffle_index = np.arange(n_interaction)
-
-    # determine the number of negative samples to draw depending on the loss function
-    # NOTE: if [loss == 'bpr'] -> [max_samples == 1] and [multiplier ~= 1] for all updates
-    # NOTE: the [multiplier] is scaled by total number of items so it's always [0, 1]
-
-    if loss == 'bpr':
-        max_samples = 1
 
     # start the main training epoch loop
 
@@ -115,7 +111,7 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
         if learning_schedule == 'constant':
             eta = learning_rate
         elif learning_schedule == 'invscaling':
-            eta = learning_rate / (epoch + 1)**learning_exponent
+            eta = learning_rate / (epoch+1)**learning_exponent
         else:
             raise ValueError('unknown [learning_schedule]')
 
@@ -145,13 +141,18 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
                         break
 
                 # calculate the pairwise utility score for the (u, i, j) triplet
-                pu_i = w_i[i] - w_i[j]
-                pu_if = np.dot(x_if[i] - x_if[j], w_if)
-                pu_u_i = np.dot(v_i[i] - v_i[j], v_u[u])
-                pu_u_if = np.dot(x_if[i] - x_if[j], np.dot(v_if, v_u[u]))
-                pu_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
-                pu_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
-                pairwise_utility = pu_i + pu_if + pu_u_i + pu_u_if + pu_i_uf + pu_uf_if
+                pairwise_utility = 0.0
+                pairwise_utility += w_i[i] - w_i[j]
+                pairwise_utility += np.dot(v_i[i] - v_i[j], v_u[u])
+
+                # add terms related to user-features and/or item-features only if supplied (all zero otherwise)
+                if x_uf_any:
+                    pairwise_utility += np.dot(x_uf[u], np.dot(v_uf, v_i[i] - v_i[j]))
+                if x_if_any:
+                    pairwise_utility += np.dot(x_if[i] - x_if[j], w_if)
+                    pairwise_utility += np.dot(x_if[i] - x_if[j], np.dot(v_if, v_u[u]))
+                if x_if_any and x_uf_any:
+                    pairwise_utility += np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i] - x_if[j]))
 
                 # check to see if this (u, i, j) triple has the worst rank reversal seen so far
                 if pairwise_utility < min_pairwise_utility:
@@ -178,9 +179,16 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
             # calculate the [item] and [user/item factor] derivatives
             d_w_i = 1.0
             d_w_j = -1.0
-            d_v_u = v_i[i] - v_i[j] + np.dot(v_if.T, x_if[i] - x_if[j])
-            d_v_i = v_u[u] + np.dot(v_uf.T, x_uf[u])
-            d_v_j = -v_u[u] - np.dot(v_uf.T, x_uf[u])
+            d_v_i = v_u[u]
+            d_v_j = -v_u[u]
+            d_v_u = v_i[i] - v_i[j]
+
+            # add terms to the derivatives if user/item features present
+            if x_uf_any:
+                d_v_i += np.dot(v_uf.T, x_uf[u])
+                d_v_j -= np.dot(v_uf.T, x_uf[u])
+            if x_if_any:
+                d_v_u += np.dot(v_if.T, x_if[i] - x_if[j])
 
             # update the [item] and [user/item factor] weights with a gradient step
             w_i[i] += eta * (sw * multiplier * (d_con * d_w_i) - (d_reg * w_i[i]))
@@ -189,23 +197,23 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
             v_i[i] += eta * (sw * multiplier * (d_con * d_v_i) - (d_reg * v_i[i]))
             v_i[j] += eta * (sw * multiplier * (d_con * d_v_j) - (d_reg * v_i[j]))
 
-            # get the non-zero indices of user/item features for this (u, i, j) triplet
-            x_uf_nz = np.nonzero(x_uf[u])[0]
-            x_if_nz = np.nonzero(x_if[i] - x_if[j])[0]
-
             # update [user-feature-factor] weights for the non-zero user features
-            for p in x_uf_nz:
-                for f in range(F):
-                    d_v_uf = (x_uf[u][p]) * (v_i[i][f] - v_i[j][f] + np.dot(v_if.T[f], x_if[i] - x_if[j]))
-                    v_uf[p, f] += eta * (sw * multiplier * (d_con * d_v_uf) - (d_reg * v_uf[p, f]))
+            if x_uf_any:
+                x_uf_nz = np.nonzero(x_uf[u])[0]
+                for p in x_uf_nz:
+                    for f in range(F):
+                        d_v_uf = (x_uf[u][p]) * (v_i[i][f] - v_i[j][f] + np.dot(v_if.T[f], x_if[i] - x_if[j]))
+                        v_uf[p, f] += eta * (sw * multiplier * (d_con * d_v_uf) - (d_reg * v_uf[p, f]))
 
             # update [item-feature] and [item-feature-factor] weights for the non-zero item features
-            for q in x_if_nz:
-                d_w_if = x_if[i][q] - x_if[j][q]
-                w_if[q] += eta * (sw * multiplier * (d_con * d_w_if) - (d_reg * w_if[q]))
-                for f in range(F):
-                    d_v_if = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
-                    v_if[q, f] += eta * (sw * multiplier * (d_con * d_v_if) - (d_reg * v_if[q, f]))
+            if x_if_any:
+                x_if_nz = np.nonzero(x_if[i] - x_if[j])[0]
+                for q in x_if_nz:
+                    d_w_if = x_if[i][q] - x_if[j][q]
+                    w_if[q] += eta * (sw * multiplier * (d_con * d_w_if) - (d_reg * w_if[q]))
+                    for f in range(F):
+                        d_v_if = (x_if[i][q] - x_if[j][q]) * (v_u[u][f] + np.dot(v_uf.T[f], x_uf[u]))
+                        v_if[q, f] += eta * (sw * multiplier * (d_con * d_v_if) - (d_reg * v_if[q, f]))
 
         # assert all model weights are finite as of the end of this epoch
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
@@ -219,7 +227,7 @@ def _fit(loss, max_samples, interactions, sample_weight, user_items, item_idx, r
     return w_i, w_if, v_u, v_i, v_uf, v_if
 
 
-@nb.njit
+@nb.njit(cache=True)
 def _predict(pairs, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """private JIT user/item pair scoring function
 
@@ -230,6 +238,10 @@ def _predict(pairs, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     # initialize the scores vector
     n_scores = len(pairs)
     scores = np.empty(n_scores, dtype=np.float32)
+
+    # determine whether user and/or item features were supplied
+    x_uf_any = x_uf.any()
+    x_if_any = x_if.any()
 
     for row in range(n_scores):
 
@@ -242,25 +254,31 @@ def _predict(pairs, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
             scores[row] = np.nan
         else:
 
-            # calculate the pointwise utility score for the (u, i) pair
-
+            # convert valid identifiers to integers for look-up
             u = int(u)
             i = int(i)
 
-            ut_i = w_i[i]
-            ut_if = np.dot(x_if[i], w_if)
-            ut_u_i = np.dot(v_i[i], v_u[u])
-            ut_u_if = np.dot(x_if[i], np.dot(v_if, v_u[u]))
-            ut_i_uf = np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
-            ut_uf_if = np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i]))
+            # calculate the pointwise utility score for the (u, i) pair
+            item_utility = 0.0
+            item_utility += w_i[i]
+            item_utility += np.dot(v_i[i], v_u[u])
 
-            item_utility = ut_i + ut_if + ut_u_i + ut_u_if + ut_i_uf + ut_uf_if
+            # add contributions from user/item features if they exist
+            if x_uf_any:
+                item_utility += np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
+            if x_if_any:
+                item_utility += np.dot(x_if[i], w_if)
+                item_utility += np.dot(x_if[i], np.dot(v_if, v_u[u]))
+            if x_if_any and x_uf_any:
+                item_utility += np.dot(np.dot(v_uf.T, x_uf[u]), np.dot(v_if.T, x_if[i]))
+
+            # save the final additive item utility for the user
             scores[row] = item_utility
 
     return scores
 
 
-@nb.njit
+@nb.njit(cache=True)
 def _recommend(users, user_items, n_items, filter_previous, x_uf, x_if, w_i, w_if, v_u, v_i, v_uf, v_if):
     """internal JIT user scoring function
 
@@ -275,6 +293,10 @@ def _recommend(users, user_items, n_items, filter_previous, x_uf, x_if, w_i, w_i
     n_users = len(users)
     rec_items = np.empty((n_users, n_items), dtype=np.float32)
 
+    # determine whether user and/or item features were supplied
+    x_uf_any = x_uf.any()
+    x_if_any = x_if.any()
+
     for row in range(n_users):
 
         # set the rec item vector to nan if the user not found
@@ -285,13 +307,15 @@ def _recommend(users, user_items, n_items, filter_previous, x_uf, x_if, w_i, w_i
             u = int(u)
 
             # calculate the pointwise utility scores of all items for the user
-            ut_i = w_i
-            ut_if = np.dot(x_if, w_if)
-            ut_u_i = np.dot(v_i, v_u[u])
-            ut_u_if = np.dot(x_if, np.dot(v_if, v_u[u]))
-            ut_i_uf = np.dot(np.dot(v_uf, v_i.T).T, x_uf[u])
-            ut_uf_if = np.dot(np.dot(x_if, v_if), np.dot(v_uf.T, x_uf[u]))
-            item_utilities = ut_i + ut_if + ut_u_i + ut_u_if + ut_i_uf + ut_uf_if
+            item_utilities = w_i + np.dot(v_i, v_u[u])
+
+            if x_uf_any:
+                item_utilities += np.dot(np.dot(v_uf, v_i.T).T, x_uf[u])
+            if x_if_any:
+                item_utilities += np.dot(x_if, w_if)
+                item_utilities += np.dot(x_if, np.dot(v_if, v_u[u]))
+            if x_if_any and x_uf_any:
+                item_utilities += np.dot(np.dot(x_if, v_if), np.dot(v_uf.T, x_uf[u]))
 
             # get a ranked list of item index positions for the user
             ranked_items = np.argsort(item_utilities)[::-1]

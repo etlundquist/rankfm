@@ -173,11 +173,16 @@ class RankFM():
         # create python/numba lookup dictionaries containing the set of observed items for each user
         # NOTE: the typed numba dictionary will be used to sample unobserved items during training
         # NOTE: the interactions data must be converted to np.ndarray prior to training to use @njit
+        # NOTE: if the model has been previously fit extend rather than replace the itemset for each user
 
-        self.user_items_nb = nb.typed.Dict.empty(key_type=nb.types.int32, value_type=nb.types.int32[:])
-        self.user_items_py = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
+        if self.is_fit:
+            new_user_items = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
+            self.user_items_py = {user: np.sort(np.array(list(set(self.user_items_py[user]) | set(new_user_items[user])), dtype=np.int32)) for user in self.user_items_py.keys()}
+        else:
+            self.user_items_py = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
+            self.user_items_nb = nb.typed.Dict.empty(key_type=nb.types.int32, value_type=nb.types.int32[:])
+
         self.interactions = self.interactions.to_numpy()
-
         for user, items in self.user_items_py.items():
             self.user_items_nb[user] = items
 
@@ -281,9 +286,18 @@ class RankFM():
         else:
             self._init_all(interactions, user_features, item_features, sample_weight)
 
+        # determine the number of negative samples to draw depending on the loss function
+        # NOTE: if [loss == 'bpr'] -> [max_samples == 1] and [multiplier ~= 1] for all updates
+        # NOTE: the [multiplier] is scaled by total number of items so it's always [0, 1]
+
+        if self.loss == 'bpr':
+            max_samples = 1
+        elif self.loss == 'warp':
+            max_samples = self.max_samples
+        else:
+            raise ValueError('[loss] function not recognized')
+
         updated_weights = _fit(
-            self.loss,
-            self.max_samples,
             self.interactions,
             self.sample_weight,
             self.user_items_nb,
@@ -292,6 +306,7 @@ class RankFM():
             self.learning_rate,
             self.learning_schedule,
             self.learning_exponent,
+            max_samples,
             epochs,
             verbose,
             self.x_uf,
