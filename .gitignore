@@ -3,6 +3,11 @@ data/
 examples/ignore/
 cython/
 
+# cython generated files
+*.c
+*.cpython-37m-darwin.so
+*.html
+
 # system files
 *.DS_Store
 *.pyc
