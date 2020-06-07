@@ -5,41 +5,17 @@
 # [C/Python] dependencies
 # -----------------------
 
+
 from libc.stdlib cimport malloc, free, rand
 from libc.math cimport log, exp, pow
 cimport cython
 
 import numpy as np
 
-# ---------------------
-# [C] utility functions
-# ---------------------
 
-
-cdef void add_vv(int n, float *x, float *y, float *out) nogil:
-    """add two vectors and place the result in a third"""
-
-    cdef int i
-    for i in range(n):
-        out[i] = x[i] + y[i]
-
-
-cdef void sub_vv(int n, float *x, float *y, float *out) nogil:
-    """subtract two vectors and place the result in a third"""
-
-    cdef int i
-    for i in range(n):
-        out[i] = x[i] - y[i]
-
-
-cdef float dot_vv(int n, float *x, float *y) nogil:
-    """compute the dot product of two vectors"""
-
-    cdef int i
-    cdef float res = 0.0
-    for i in range(n):
-        res += x[i] * y[i]
-    return res
+# --------------------
+# [C] helper functions
+# --------------------
 
 
 cdef int lsearch(int item, int *items, int n) nogil:
@@ -70,9 +46,53 @@ cdef int bsearch(int item, int *items, int n) nogil:
     return 0
 
 
-# --------------------------
-# [Python] utility functions
-# --------------------------
+cdef float compute_ui_utility(
+    int F,
+    int P,
+    int Q,
+    float *x_uf,
+    float *x_if,
+    float *w_i,
+    float *w_if,
+    float *v_u,
+    float *v_i,
+    float *v_uf,
+    float *v_if,
+    int x_uf_any,
+    int x_if_any
+) nogil:
+
+    cdef int f, p, q
+    cdef float res = w_i[0]
+
+    for f in range(F):
+        # user * item: np.dot(v_u[u], v_i[i])
+        res += v_u[f] * v_i[f]
+
+    if x_uf_any:
+        for p in range(P):
+            if x_uf[p] == 0.0:
+                continue
+            for f in range(F):
+                # user-features * item: np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
+                res += x_uf[p] * (v_uf[(F * p) + f] * v_i[f])
+
+    if x_if_any:
+        for q in range(Q):
+            if x_if[q] == 0.0:
+                continue
+            # item-features: np.dot(x_if[i], w_if)
+            res += x_if[q] * w_if[q]
+            for f in range(F):
+                # item-features * user: np.dot(x_if[i], np.dot(v_if, v_u[u]))
+                res += x_if[q] * (v_if[(F * q) + f] * v_u[f])
+
+    return res
+
+
+# -------------------------
+# [Python] helper functions
+# -------------------------
 
 
 def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
@@ -135,18 +155,22 @@ def fit(
     cdef int f, r, u, i, j
     cdef int epoch, row, sampled
 
-    # sample weights, learning rate, log-likelihood
-    cdef float sw, eta, log_likelihood
+    # epoch-specific learning rate and log-likelihood
+    cdef float eta, log_likelihood
 
-    # WARP sampling parameters
+    # sample weights and (ui, uj) utility scores
+    cdef float sw, ut_ui, ut_uj
+
+    # WARP sampling variables
     cdef int margin = 1
     cdef int min_index
     cdef float pairwise_utility, min_pairwise_utility
 
-    # loss function inner derivatives wrt model weights
+    # loss function derivatives wrt model weights
     cdef float d_con
     cdef float d_reg = 2.0 * regularization
-    cdef float d_w_i = 1.0, d_w_j = -1.0
+    cdef float d_w_i = 1.0
+    cdef float d_w_j = -1.0
     cdef float d_v_i, d_v_j, d_v_u
 
     #######################################
@@ -161,14 +185,11 @@ def fit(
     Q = v_if.shape[0]
     F = v_u.shape[1]
 
-    # create temporary memoryviews to hold intermediate calculation results
-    cdef float[:] f_ij = np.empty(F, dtype=np.float32)
-
-    # determine whether user-features/item-features were supplied
+    # determine whether any user-features/item-features were supplied
     x_uf_any = int(np.asarray(x_uf).any())
     x_if_any = int(np.asarray(x_if).any())
 
-    # create a shuffle index to diversify each training epoch
+    # create a shuffle index to diversify each training epoch and register as a memoryview to use in NOGIL
     shuffle_index = np.arange(N, dtype=np.int32)
     cdef int[:] shuffle_index_mv = shuffle_index
 
@@ -192,23 +213,35 @@ def fit(
 
     for epoch in range(epochs):
 
-        # set the learning rate and re-set the log-likelihood for this epoch
+        np.random.shuffle(shuffle_index)
         eta = learning_rate / pow(epoch + 1, learning_exponent)
         log_likelihood = 0.0
 
-        # re-shuffle the data prior to training
-        np.random.shuffle(shuffle_index)
-
-        # begin training loop over observed (u, i) pairs
         for r in range(N):
 
-            # locate the observed user/item/sample-weight
+            # locate the observed (user, item, sample-weight)
             row = shuffle_index_mv[r]
             u = interactions[row, 0]
             i = interactions[row, 1]
             sw = sample_weight[row]
 
-            # record the index and the pairwise utility of the worst rank reversal
+            # compute the utility score of the observed (u, i) pair
+            ut_ui = compute_ui_utility(
+                F,
+                P,
+                Q,
+                &x_uf[u, 0],
+                &x_if[i, 0],
+                &w_i[i],
+                &w_if[0],
+                &v_u[u, 0],
+                &v_i[i, 0],
+                &v_uf[0, 0],
+                &v_if[0, 0],
+                x_uf_any,
+                x_if_any
+            )
+
             min_index = -1
             min_pairwise_utility = 1e6
 
@@ -221,20 +254,28 @@ def fit(
                     if not lsearch(j, c_user_items[u], c_items_user[u]):
                         break
 
-                # take the vector difference of item factors: f_ij = v_i(i) - v_i(j)
-                sub_vv(F, &v_i[i][0], &v_i[j][0], &f_ij[0])
+                # compute the utility score of the unobserved (u, j) pair and the subsequent pairwise utility
+                ut_uj = compute_ui_utility(
+                    F,
+                    P,
+                    Q,
+                    &x_uf[u, 0],
+                    &x_if[j, 0],
+                    &w_i[j],
+                    &w_if[0],
+                    &v_u[u, 0],
+                    &v_i[j, 0],
+                    &v_uf[0, 0],
+                    &v_if[0, 0],
+                    x_uf_any,
+                    x_if_any
+                )
+                pairwise_utility = ut_ui - ut_uj
 
-                # calculate the pairwise utility score for the (u, i, j) triplet
-                pairwise_utility = 0.0
-                pairwise_utility += w_i[i] - w_i[j]
-                pairwise_utility += dot_vv(F, &v_u[u][0], &f_ij[0])
-
-                # check to see if this (u, i, j) triple has the worst rank reversal seen so far
                 if pairwise_utility < min_pairwise_utility:
                     min_index = j
                     min_pairwise_utility = pairwise_utility
 
-                # check to see if this (u, i, j) triple violates the rank reversal margin
                 if pairwise_utility < margin:
                     break
 
