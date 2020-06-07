@@ -47,20 +47,20 @@ cdef float compute_ui_utility(
     int F,
     int P,
     int Q,
-    float *x_uf,
-    float *x_if,
-    float *w_i,
-    float *w_if,
-    float *v_u,
-    float *v_i,
-    float *v_uf,
-    float *v_if,
+    float[::1] x_uf,
+    float[::1] x_if,
+    float w_i,
+    float[::1] w_if,
+    float[::1] v_u,
+    float[::1] v_i,
+    float[:, ::1] v_uf,
+    float[:, ::1] v_if,
     int x_uf_any,
     int x_if_any
 ) nogil:
 
     cdef int f, p, q
-    cdef float res = w_i[0]
+    cdef float res = w_i
 
     for f in range(F):
         # user * item: np.dot(v_u[u], v_i[i])
@@ -72,7 +72,7 @@ cdef float compute_ui_utility(
                 continue
             for f in range(F):
                 # user-features * item: np.dot(x_uf[u], np.dot(v_uf, v_i[i]))
-                res += x_uf[p] * (v_uf[(F * p) + f] * v_i[f])
+                res += x_uf[p] * (v_uf[p, f] * v_i[f])
 
     if x_if_any:
         for q in range(Q):
@@ -82,7 +82,7 @@ cdef float compute_ui_utility(
             res += x_if[q] * w_if[q]
             for f in range(F):
                 # item-features * user: np.dot(x_if[i], np.dot(v_if, v_u[u]))
-                res += x_if[q] * (v_if[(F * q) + f] * v_u[f])
+                res += x_if[q] * (v_if[q, f] * v_u[f])
 
     return res
 
@@ -123,8 +123,8 @@ def fit(
     dict user_items,
     float[:, ::1] x_uf,
     float[:, ::1] x_if,
-    float[:] w_i,
-    float[:] w_if,
+    float[::1] w_i,
+    float[::1] w_if,
     float[:, ::1] v_u,
     float[:, ::1] v_i,
     float[:, ::1] v_uf,
@@ -219,21 +219,7 @@ def fit(
             sw = sample_weight[row]
 
             # compute the utility score of the observed (u, i) pair
-            ut_ui = compute_ui_utility(
-                F,
-                P,
-                Q,
-                &x_uf[u, 0],
-                &x_if[i, 0],
-                &w_i[i],
-                &w_if[0],
-                &v_u[u, 0],
-                &v_i[i, 0],
-                &v_uf[0, 0],
-                &v_if[0, 0],
-                x_uf_any,
-                x_if_any
-            )
+            ut_ui = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
 
             # WARP sampling loop for the (u, i) pair
             # --------------------------------------
@@ -250,21 +236,7 @@ def fit(
                         break
 
                 # compute the utility score of the unobserved (u, j) pair and the subsequent pairwise utility
-                ut_uj = compute_ui_utility(
-                    F,
-                    P,
-                    Q,
-                    &x_uf[u, 0],
-                    &x_if[j, 0],
-                    &w_i[j],
-                    &w_if[0],
-                    &v_u[u, 0],
-                    &v_i[j, 0],
-                    &v_uf[0, 0],
-                    &v_if[0, 0],
-                    x_uf_any,
-                    x_if_any
-                )
+                ut_uj = compute_ui_utility(F, P, Q, x_uf[u], x_if[j], w_i[j], w_if, v_u[u], v_i[j], v_uf, v_if, x_uf_any, x_if_any)
                 pairwise_utility = ut_ui - ut_uj
 
                 if pairwise_utility < min_pairwise_utility:
