@@ -5,18 +5,15 @@
 # [C/Python] dependencies
 # -----------------------
 
-
 from libc.stdlib cimport malloc, free, rand
 from libc.math cimport log, exp, pow
 cimport cython
 
 import numpy as np
 
-
 # --------------------
 # [C] helper functions
 # --------------------
-
 
 cdef int lsearch(int item, int *items, int n) nogil:
     """linear search for a given item in a sorted array of items"""
@@ -89,11 +86,9 @@ cdef float compute_ui_utility(
 
     return res
 
-
 # -------------------------
 # [Python] helper functions
 # -------------------------
-
 
 def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
     """assert all model weights are finite"""
@@ -118,11 +113,9 @@ def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
     penalty += np.sum(regularization * np.square(v_if))
     return penalty
 
-
 # --------------------------------
 # [RankFM] core modeling functions
 # --------------------------------
-
 
 def fit(
     int[:, ::1] interactions,
@@ -167,11 +160,11 @@ def fit(
     cdef float pairwise_utility, min_pairwise_utility
 
     # loss function derivatives wrt model weights
-    cdef float d_con
+    cdef float d_outer
     cdef float d_reg = 2.0 * regularization
     cdef float d_w_i = 1.0
     cdef float d_w_j = -1.0
-    cdef float d_v_i, d_v_j, d_v_u
+    cdef float d_w_if, d_v_i, d_v_j, d_v_u, d_v_uf, d_v_if
 
     #######################################
     ### PYTHON SET-UP PRIOR TO TRAINING ###
@@ -242,10 +235,12 @@ def fit(
                 x_if_any
             )
 
+            # WARP sampling loop for the (u, i) pair
+            # --------------------------------------
+
             min_index = -1
             min_pairwise_utility = 1e6
 
-            # start the WARP sampling loop for the (u, i) pair
             for sampled in range(1, max_samples + 1):
 
                 # randomly sample an unobserved item (j) for the user
@@ -285,21 +280,61 @@ def fit(
             multiplier = log((I - 1) / sampled) / log(I)
             log_likelihood += log(1 / (1 + exp(-pairwise_utility)))
 
-            # calculate the outer-derivative [d_LL/d_g(pu)]
-            d_con = 1.0 / (exp(pairwise_utility) + 1.0)
+            # gradient step model weight updates
+            # ----------------------------------
 
-            # update the item weights with a gradient step
-            w_i[i] += eta * (sw * multiplier * (d_con * d_w_i) - (d_reg * w_i[i]))
-            w_i[j] += eta * (sw * multiplier * (d_con * d_w_j) - (d_reg * w_i[j]))
+            # calculate the outer derivative [d_LL / d_g(pu)]
+            d_outer = 1.0 / (exp(pairwise_utility) + 1.0)
 
-            # update the user/item factor weights with a gradient step
+            # update the [item] weights
+            w_i[i] += eta * (sw * multiplier * (d_outer * d_w_i) - (d_reg * w_i[i]))
+            w_i[j] += eta * (sw * multiplier * (d_outer * d_w_j) - (d_reg * w_i[j]))
+
+            # update the [item-feature] weights
+            if x_if_any:
+                for q in range(Q):
+                    d_w_if = x_if[i, q] - x_if[j, q]
+                    w_if[q] += eta * (sw * multiplier * (d_outer * d_w_if) - (d_reg * w_if[q]))
+
+            # update all [factor] weights
             for f in range(F):
-                d_v_u = v_i[i][f] - v_i[j][f]
-                d_v_i = v_u[u][f]
-                d_v_j = -v_u[u][f]
-                v_u[u][f] += eta * (sw * multiplier * (d_con * d_v_u) - (d_reg * v_u[u][f]))
-                v_i[i][f] += eta * (sw * multiplier * (d_con * d_v_i) - (d_reg * v_i[i][f]))
-                v_i[j][f] += eta * (sw * multiplier * (d_con * d_v_j) - (d_reg * v_i[j][f]))
+
+                # [user-factor] and [item-factor] derivatives wrt [user-factors] and [item-factors]
+                d_v_u = v_i[i, f] - v_i[j, f]
+                d_v_i = v_u[u, f]
+                d_v_j = -v_u[u, f]
+
+                # add [user-features] to [item-factor] derivatives if supplied
+                if x_uf_any:
+                    for p in range(P):
+                        d_v_i += v_uf[p, f] * x_uf[u, p]
+                        d_v_j -= v_uf[p, f] * x_uf[u, p]
+
+                # add [item-features] in [user-factor] derivatives if supplied
+                if x_if_any:
+                    for q in range(Q):
+                        d_v_u += v_if[q, f] * (x_if[i, q] - x_if[j, q])
+
+                # update the [user-factor] and [item-factor] weights with the final gradient values
+                v_u[u, f] += eta * (sw * multiplier * (d_outer * d_v_u) - (d_reg * v_u[u, f]))
+                v_i[i, f] += eta * (sw * multiplier * (d_outer * d_v_i) - (d_reg * v_i[i, f]))
+                v_i[j, f] += eta * (sw * multiplier * (d_outer * d_v_j) - (d_reg * v_i[j, f]))
+
+                # update the [user-feature-factor] weights if user features were supplied
+                if x_uf_any:
+                    for p in range(P):
+                        if x_uf[u, p] == 0.0:
+                            continue
+                        d_v_uf = x_uf[u, p] * (v_i[i, f] - v_i[j, f])
+                        v_uf[p, f] += eta * (sw * multiplier * (d_outer * d_v_uf) - (d_reg * v_uf[p, f]))
+
+                # update the [item-feature-factor] weights if item features were supplied
+                if x_if_any:
+                    for q in range(Q):
+                        if x_if[i, q] - x_if[j, q] == 0:
+                            continue
+                        d_v_if = (x_if[i, q] - x_if[j, q]) * v_u[u, f]
+                        v_if[q, f] += eta * (sw * multiplier * (d_outer * d_v_if) - (d_reg * v_if[q, f]))
 
         ##########################
         ### END TRAINING EPOCH ###
