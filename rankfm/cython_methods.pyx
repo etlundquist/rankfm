@@ -117,7 +117,7 @@ def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
 # [RankFM] core modeling functions
 # --------------------------------
 
-def fit(
+def _fit(
     int[:, ::1] interactions,
     float[:] sample_weight,
     dict user_items,
@@ -330,4 +330,56 @@ def fit(
         free(c_user_items[u])
     free(c_items_user)
     free(c_user_items)
+
+
+
+
+
+def _predict(
+    float[:, ::1] pairs,
+    float[:, ::1] x_uf,
+    float[:, ::1] x_if,
+    float[::1] w_i,
+    float[::1] w_if,
+    float[:, ::1] v_u,
+    float[:, ::1] v_i,
+    float[:, ::1] v_uf,
+    float[:, ::1] v_if,
+):
+
+    # declare variables
+    cdef int N, P, Q, F
+    cdef int x_uf_any, x_if_any
+
+    cdef int n_scores, row, u, i
+    cdef float u_flt, i_flt
+
+    # calculate matrix shapes
+    N = pairs.shape[0]
+    P = v_uf.shape[0]
+    Q = v_if.shape[0]
+    F = v_u.shape[1]
+
+    # determine whether any user-features/item-features were supplied
+    x_uf_any = int(np.asarray(x_uf).any())
+    x_if_any = int(np.asarray(x_if).any())
+
+    # initialize the output scores vector
+    scores = np.empty(N, dtype=np.float32)
+
+    for row in range(N):
+
+        # locate the user/item to score
+        u_flt = pairs[row, 0]
+        i_flt = pairs[row, 1]
+
+        # set the score to nan if the user or item not found
+        if np.isnan(u_flt) or np.isnan(i_flt):
+            scores[row] = np.nan
+        else:
+            # calculate the pointwise utility score for the (u, i) pair
+            u, i = int(u_flt), int(i_flt)
+            scores[row] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
+
+    return scores
 
