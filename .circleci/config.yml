@@ -16,8 +16,7 @@ jobs:
           command: |
             pip install --upgrade pip
             pip install -r requirements.txt
-            python setup.py build_ext
-            python setup.py install
+            python setup.py build_ext --inplace
       - save_cache:
           key: deps-{{ .Branch }}-{{ checksum "requirements.txt" }}
           paths:
