@@ -5,7 +5,7 @@ from Cython.Build import cythonize
 # ----------------------------------------
 
 extensions = [
-    Extension("cython_methods", ["rankfm/cython_methods.pyx"])
+    Extension("rankfm.cython_methods", ["rankfm/cython_methods.pyx"])
 ]
 
 # define the main package setup function
