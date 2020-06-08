@@ -308,11 +308,7 @@ def _fit(
                         d_v_if = (x_if[i, q] - x_if[j, q]) * v_u[u, f]
                         v_if[q, f] += eta * (sw * multiplier * (d_outer * d_v_if) - (d_reg * v_if[q, f]))
 
-        ##########################
-        ### END TRAINING EPOCH ###
-        ##########################
-
-        # assert all model weights are finite as of the end of this epoch
+        # [end epoch]: assert all model weights are finite
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
 
         # report the penalized log-likelihood for this training epoch
@@ -321,18 +317,11 @@ def _fit(
         print("\ntraining epoch:", epoch)
         print("log likelihood:", log_likelihood)
 
-    ####################################
-    ### END MAIN TRAINING EPOCH LOOP ###
-    ####################################
-
-    # free c-arrays memory
+    # [end training]: free memory of c-arrays before exiting function
     for u in range(U):
         free(c_user_items[u])
     free(c_items_user)
     free(c_user_items)
-
-
-
 
 
 def _predict(
@@ -350,8 +339,7 @@ def _predict(
     # declare variables
     cdef int N, P, Q, F
     cdef int x_uf_any, x_if_any
-
-    cdef int n_scores, row, u, i
+    cdef int row, u, i
     cdef float u_flt, i_flt
 
     # calculate matrix shapes
@@ -382,4 +370,74 @@ def _predict(
             scores[row] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
 
     return scores
+
+
+def _recommend(
+    float[::1] users,
+    dict user_items,
+    int n_items,
+    bint filter_previous,
+    float[:, ::1] x_uf,
+    float[:, ::1] x_if,
+    float[::1] w_i,
+    float[::1] w_if,
+    float[:, ::1] v_u,
+    float[:, ::1] v_i,
+    float[:, ::1] v_uf,
+    float[:, ::1] v_if
+):
+
+    # declare variables
+    cdef int U, I, P, Q, F
+    cdef int x_uf_any, x_if_any
+    cdef int row, u, i, s
+    cdef float u_flt
+
+    # calculate matrix shapes
+    U = users.shape[0]
+    I = w_i.shape[0]
+    P = v_uf.shape[0]
+    Q = v_if.shape[0]
+    F = v_u.shape[1]
+
+    # determine whether any user-features/item-features were supplied
+    x_uf_any = int(np.asarray(x_uf).any())
+    x_if_any = int(np.asarray(x_if).any())
+
+    # initialize the [UxR] recommendations matrix
+    rec_items = np.empty((U, n_items), dtype=np.float32)
+
+    # initialize a temporary buffer to store all item scores for a given user
+    item_scores = np.empty(I, dtype=np.float32)
+    cdef float[::1] item_scores_mv = item_scores
+
+    for row in range(U):
+        u_flt = users[row]
+        if np.isnan(u_flt):
+            # set the rec item vector to nan if the user not found
+            rec_items[row] = np.full(n_items, np.nan, dtype=np.float32)
+        else:
+            # calculate the scores for all items wrt the current user
+            u = int(u_flt)
+            for i in range(I):
+                item_scores_mv[i] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
+
+            # get a ranked list of item index positions for the user
+            ranked_items = np.argsort(item_scores)[::-1]
+            selected_items = np.empty(n_items, dtype=np.float32)
+
+            # select the topN items for each user, optionally skipping previously observed items
+            s = 0
+            for i in range(I):
+                if filter_previous and ranked_items[i] in user_items[u]:
+                    continue
+                else:
+                    selected_items[s] = ranked_items[i]
+                    s += 1
+                if s == n_items:
+                    break
+
+            rec_items[row] = selected_items
+
+    return rec_items
 
