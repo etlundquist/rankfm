@@ -115,7 +115,7 @@ class RankFM():
         assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
 
         # save the unique lists of users/items in terms of original identifiers
-        interactions_df =  pd.DataFrame(get_data(interactions), columns=['user_id', 'item_id'])
+        interactions_df = pd.DataFrame(get_data(interactions), columns=['user_id', 'item_id'])
         self.user_id = pd.Series(np.sort(np.unique(interactions_df['user_id'])))
         self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
@@ -317,7 +317,7 @@ class RankFM():
         :return: np.array of real-valued model scores
         """
 
-         # check user data inputs
+        # check user data inputs
         assert isinstance(pairs, (np.ndarray, pd.DataFrame)), "[pairs] must be np.ndarray or pd.dataframe"
         assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
