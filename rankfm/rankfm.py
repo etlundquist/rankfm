@@ -6,7 +6,7 @@ import numpy as np
 import numba as nb
 import pandas as pd
 
-from rankfm.numba_methods import _fit, _predict, _recommend
+from rankfm.cython_methods import _fit, _predict, _recommend
 from rankfm.utils import get_data
 
 class RankFM():
@@ -74,9 +74,8 @@ class RankFM():
         self.interactions = None
         self.sample_weight = None
 
-        # dictionary user observed items lookups
-        self.user_items_py = None
-        self.user_items_nb = None
+        # dictionary of observed items for each user
+        self.user_items = None
 
         # user/item features
         self.x_uf = None
@@ -155,16 +154,16 @@ class RankFM():
         self.interactions = pd.DataFrame(get_data(interactions).copy(), columns=['user_id', 'item_id'])
         self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index).astype(np.int32)
         self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index).astype(np.int32)
-        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna().astype(np.int32)
+        self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna()
 
         # store the sample weights internally or create a vector of ones if not passed
         if sample_weight is not None:
             assert isinstance(sample_weight, (np.ndarray, pd.Series)), "[sample_weight] must be np.ndarray or pd.series"
             assert sample_weight.ndim == 1, "[sample_weight] must a vector (ndim=1)"
             assert len(sample_weight) == len(interactions), "[sample_weight] must have the same length as [interactions]"
-            self.sample_weight = get_data(sample_weight).astype(np.float32)
+            self.sample_weight = np.ascontiguousarray(get_data(sample_weight), dtype=np.float32)
         else:
-            self.sample_weight = np.ones(len(self.interactions), dtype=np.float32, order='C')
+            self.sample_weight = np.ones(len(self.interactions), dtype=np.float32)
 
         # create python/numba lookup dictionaries containing the set of observed items for each user
         # NOTE: the typed numba dictionary will be used to sample unobserved items during training
@@ -173,14 +172,13 @@ class RankFM():
 
         if self.is_fit:
             new_user_items = self.interactions.groupby('user_idx')['item_idx'].apply(set).to_dict()
-            self.user_items_py = {user: np.sort(np.array(list(set(self.user_items_py[user]) | set(new_user_items[user])), dtype=np.int32)) for user in self.user_items_py.keys()}
+            self.user_items = {user: np.sort(np.array(list(set(self.user_items[user]) | set(new_user_items[user])), dtype=np.int32)) for user in self.user_items.keys()}
         else:
-            self.user_items_py = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
-            self.user_items_nb = nb.typed.Dict.empty(key_type=nb.types.int32, value_type=nb.types.int32[:])
+            self.user_items = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
 
-        self.interactions = self.interactions.to_numpy()
-        for user, items in self.user_items_py.items():
-            self.user_items_nb[user] = items
+        # format the interactions data as a c-contiguous integer array for cython
+        self.interactions = np.ascontiguousarray(self.interactions, dtype=np.int32)
+
 
 
     def _init_features(self, user_features=None, item_features=None):
@@ -197,11 +195,11 @@ class RankFM():
             x_uf = x_uf.set_index(x_uf.columns[0])
             x_uf.index = x_uf.index.map(self.user_to_index)
             if np.array_equal(sorted(x_uf.index.values), self.user_idx):
-                self.x_uf = np.array(x_uf.sort_index(), dtype=np.float32, order='C')
+                self.x_uf = np.ascontiguousarray(x_uf.sort_index(), dtype=np.float32)
             else:
                 raise KeyError('the users in [user_features] do not match the users in [interactions]')
         else:
-            self.x_uf = np.zeros([len(self.user_idx), 1], dtype=np.float32, order='C')
+            self.x_uf = np.zeros([len(self.user_idx), 1], dtype=np.float32)
 
         # store the item features as a ndarray [IxQ] row-ordered by item index position
         if item_features is not None:
@@ -209,11 +207,11 @@ class RankFM():
             x_if = x_if.set_index(x_if.columns[0])
             x_if.index = x_if.index.map(self.item_to_index)
             if np.array_equal(sorted(x_if.index.values), self.item_idx):
-                self.x_if = np.array(x_if.sort_index(), dtype=np.float32, order='C')
+                self.x_if = np.ascontiguousarray(x_if.sort_index(), dtype=np.float32)
             else:
                 raise KeyError('the items in [item_features] do not match the items in [interactions]')
         else:
-            self.x_if = np.zeros([len(self.item_idx), 1], dtype=np.float32, order='C')
+            self.x_if = np.zeros([len(self.item_idx), 1], dtype=np.float32)
 
 
     def _init_weights(self, user_features, item_features):
@@ -232,15 +230,14 @@ class RankFM():
         if user_features is not None:
             self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors], dtype=np.float32, order='C')
+            self.v_uf = np.zeros([self.x_uf.shape[1], self.factors], dtype=np.float32)
 
         # randomly initialize item feature factors if item features were supplied
         # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
         if item_features is not None:
             self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
         else:
-            self.v_if = np.zeros([self.x_if.shape[1], self.factors], dtype=np.float32, order='C')
-
+            self.v_if = np.zeros([self.x_if.shape[1], self.factors], dtype=np.float32)
 
 
     # -------------------------------
@@ -293,18 +290,11 @@ class RankFM():
         else:
             raise ValueError('[loss] function not recognized')
 
-        updated_weights = _fit(
+        # NOTE: the cython internal fit method updates the model weights in place via memoryviews
+        _fit(
             self.interactions,
             self.sample_weight,
-            self.user_items_nb,
-            self.item_idx,
-            self.regularization,
-            self.learning_rate,
-            self.learning_schedule,
-            self.learning_exponent,
-            max_samples,
-            epochs,
-            verbose,
+            self.user_items,
             self.x_uf,
             self.x_if,
             self.w_i,
@@ -312,9 +302,15 @@ class RankFM():
             self.v_u,
             self.v_i,
             self.v_uf,
-            self.v_if
+            self.v_if,
+            self.regularization,
+            self.learning_rate,
+            self.learning_schedule,
+            self.learning_exponent,
+            max_samples,
+            epochs,
+            verbose
         )
-        self.w_i, self.w_if, self.v_u, self.v_i, self.v_uf, self.v_if = updated_weights
 
         self.is_fit = True
         return self
@@ -336,8 +332,8 @@ class RankFM():
         pred_pairs = pd.DataFrame(get_data(pairs).copy(), columns=['user_id', 'item_id'])
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
+        pred_pairs = np.ascontiguousarray(pred_pairs, dtype=np.float32)
 
-        pred_pairs = pred_pairs.to_numpy().astype(np.float32)
         scores = _predict(
             pred_pairs,
             self.x_uf,
@@ -371,10 +367,10 @@ class RankFM():
         assert getattr(users, '__iter__', False), "[users] must be an iterable (e.g. list, array, series)"
         assert self.is_fit, "you must fit the model prior to generating recommendations"
 
-        user_idx = pd.Series(users).map(self.user_to_index).to_numpy(dtype=np.float32)
+        user_idx = np.ascontiguousarray(pd.Series(users).map(self.user_to_index), dtype=np.float32)
         rec_items = _recommend(
             user_idx,
-            self.user_items_nb,
+            self.user_items,
             n_items,
             filter_previous,
             self.x_uf,

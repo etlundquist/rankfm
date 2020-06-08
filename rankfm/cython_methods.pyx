@@ -119,7 +119,7 @@ def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
 
 def _fit(
     int[:, ::1] interactions,
-    float[:] sample_weight,
+    float[::1] sample_weight,
     dict user_items,
     float[:, ::1] x_uf,
     float[:, ::1] x_if,
@@ -131,9 +131,11 @@ def _fit(
     float[:, ::1] v_if,
     float regularization,
     float learning_rate,
+    str learning_schedule,
     float learning_exponent,
     int max_samples,
     int epochs,
+    bint verbose
 ):
 
     #############################
@@ -206,8 +208,16 @@ def _fit(
 
     for epoch in range(epochs):
 
+        # set the learning rate for this training epoch
+        if learning_schedule == 'constant':
+            eta = learning_rate
+        elif learning_schedule == 'invscaling':
+            eta = learning_rate / pow(epoch + 1, learning_exponent)
+        else:
+            raise ValueError('unknown [learning_schedule]')
+
+        # re-shuffle the interaction data for each epoch
         np.random.shuffle(shuffle_index)
-        eta = learning_rate / pow(epoch + 1, learning_exponent)
         log_likelihood = 0.0
 
         for r in range(N):
@@ -312,10 +322,11 @@ def _fit(
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
 
         # report the penalized log-likelihood for this training epoch
-        penalty = reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if)
-        log_likelihood = round(log_likelihood - penalty, 2)
-        print("\ntraining epoch:", epoch)
-        print("log likelihood:", log_likelihood)
+        if verbose:
+            penalty = reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if)
+            log_likelihood = round(log_likelihood - penalty, 2)
+            print("\ntraining epoch:", epoch)
+            print("log likelihood:", log_likelihood)
 
     # [end training]: free memory of c-arrays before exiting function
     for u in range(U):
