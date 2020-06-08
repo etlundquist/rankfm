@@ -111,7 +111,7 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
         if learning_schedule == 'constant':
             eta = learning_rate
         elif learning_schedule == 'invscaling':
-            eta = learning_rate / (epoch+1)**learning_exponent
+            eta = learning_rate / (epoch + 1)**learning_exponent
         else:
             raise ValueError('unknown [learning_schedule]')
 

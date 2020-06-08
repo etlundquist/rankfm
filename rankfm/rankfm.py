@@ -3,7 +3,6 @@ rankfm main modeling class
 """
 
 import numpy as np
-import numba as nb
 import pandas as pd
 
 from rankfm.cython_methods import _fit, _predict, _recommend
