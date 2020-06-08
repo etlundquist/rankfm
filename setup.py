@@ -1,8 +1,19 @@
-from setuptools import setup
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+
+# define the extension packages to include
+# ----------------------------------------
+
+extensions = [
+    Extension("cython_methods", ["rankfm/cython_methods.pyx"])
+]
+
+# define the main package setup function
+# --------------------------------------
 
 setup(
     name='rankfm',
-    version='0.1.3',
+    version='0.2.0',
     description='a python implementation of the generic factorization machines model class '
                 'adapted for collaborative filtering recommendation problems '
                 'with implicit feedback user-item interaction data '
@@ -13,7 +24,9 @@ setup(
     keywords=['machine', 'learning', 'recommendation', 'factorization', 'machines', 'implicit'],
     license='GNU General Public License v3.0',
     packages=['rankfm'],
+    ext_modules=cythonize(extensions),
+    zip_safe=False,
     python_requires='>=3.6',
-    install_requires=['numpy>=1.15', 'pandas>=0.24', 'scipy>=1.1', 'numba>=0.49']
+    install_requires=['numpy>=1.15', 'pandas>=0.24', 'Cython>=0.29']
 )
 

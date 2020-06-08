@@ -143,11 +143,11 @@ def _fit(
     #############################
 
     # matrix shapes/indicators
-    cdef int N, U, I, P, Q, F
+    cdef int N, U, I, F, P, Q
     cdef int x_uf_any, x_if_any
 
     # loop iterators/indices
-    cdef int f, r, u, i, j
+    cdef int r, u, i, j, f, p, q
     cdef int epoch, row, sampled
 
     # epoch-specific learning rate and log-likelihood
