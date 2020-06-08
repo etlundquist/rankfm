@@ -4,7 +4,7 @@ examples/ignore/
 cython/
 
 # cython generated files
-*.cpython-37m-darwin.so
+*.so
 *.html
 
 # system files
