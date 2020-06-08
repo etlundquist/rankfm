@@ -102,7 +102,7 @@ def _fit(interactions, sample_weight, user_items, item_idx, regularization, lear
 
     # create a shuffle index to diversify each training epoch
     n_interaction = len(interactions)
-    shuffle_index = np.arange(n_interaction)
+    shuffle_index = np.arange(n_interaction, dtype=np.int32)
 
     # start the main training epoch loop
 

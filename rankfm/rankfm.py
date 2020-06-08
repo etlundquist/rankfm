@@ -9,10 +9,6 @@ import pandas as pd
 from rankfm.numba_methods import _fit, _predict, _recommend
 from rankfm.utils import get_data
 
-# import warnings
-# warnings.filterwarnings("ignore", category=nb.NumbaPerformanceWarning)
-
-
 class RankFM():
     """Factorization Machines for Ranking Problems with Implicit Feedback Data"""
 
