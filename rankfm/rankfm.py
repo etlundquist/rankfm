@@ -11,13 +11,14 @@ from rankfm.utils import get_data
 class RankFM():
     """Factorization Machines for Ranking Problems with Implicit Feedback Data"""
 
-    def __init__(self, factors=10, loss='bpr', max_samples=10, regularization=0.01, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
+    def __init__(self, factors=10, loss='bpr', max_samples=10, alpha=0.01, beta=0.1, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
         """store hyperparameters and initialize internal data
 
         :param factors: latent factor rank
         :param loss: optimization/loss function to use for training: ['bpr', 'warp']
         :param max_samples: maximum number of negative samples to draw for WARP loss
-        :param regularization: L2 regularization penalty on model weights
+        :param alpha: L2 regularization penalty on [user, item] model weights
+        :param beta: L2 regularization penalty on [user-feature, item-feature] model weights
         :param sigma: standard deviation to use for random initialization of factor weights
         :param learning_rate: initial learning rate for gradient step updates
         :param learning_schedule: schedule for adjusting learning rates by training epoch: ['constant', 'invscaling']
@@ -29,7 +30,8 @@ class RankFM():
         assert isinstance(factors, int) and factors >= 1, "[factors] must be a positive integer"
         assert isinstance(loss, str) and loss in ('bpr', 'warp'), "[loss] must be in ('bpr', 'warp')"
         assert isinstance(max_samples, int) and max_samples > 0, "[max_samples] must be a positive integer"
-        assert isinstance(regularization, float) and regularization >= 0.0, "[regularization] must be a non-negative float"
+        assert isinstance(alpha, float) and alpha > 0.0, "[alpha] must be a positive float"
+        assert isinstance(beta, float) and beta > 0.0, "[beta] must be a positive float"
         assert isinstance(sigma, float) and sigma > 0.0, "[sigma] must be a positive float"
         assert isinstance(learning_rate, float) and learning_rate > 0.0, "[learning_rate] must be a positive float"
         assert isinstance(learning_schedule, str) and learning_schedule in ('constant', 'invscaling'), "[learning_schedule] must be in ('constant', 'invscaling')"
@@ -39,7 +41,8 @@ class RankFM():
         self.factors = factors
         self.loss = loss
         self.max_samples = max_samples
-        self.regularization = regularization
+        self.alpha = alpha
+        self.beta = beta
         self.sigma = sigma
         self.learning_rate = learning_rate
         self.learning_schedule = learning_schedule
@@ -227,14 +230,16 @@ class RankFM():
         # randomly initialize user feature factors if user features were supplied
         # NOTE: set all user feature factor weights to zero to prevent random scoring influence otherwise
         if user_features is not None:
-            self.v_uf = np.random.normal(loc=0, scale=self.sigma, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
+            scale = (self.alpha / self.beta) * self.sigma
+            self.v_uf = np.random.normal(loc=0, scale=scale, size=[self.x_uf.shape[1], self.factors]).astype(np.float32)
         else:
             self.v_uf = np.zeros([self.x_uf.shape[1], self.factors], dtype=np.float32)
 
         # randomly initialize item feature factors if item features were supplied
         # NOTE: set all item feature factor weights to zero to prevent random scoring influence otherwise
         if item_features is not None:
-            self.v_if = np.random.normal(loc=0, scale=self.sigma, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
+            scale = (self.alpha / self.beta) * self.sigma
+            self.v_if = np.random.normal(loc=0, scale=scale, size=[self.x_if.shape[1], self.factors]).astype(np.float32)
         else:
             self.v_if = np.zeros([self.x_if.shape[1], self.factors], dtype=np.float32)
 
@@ -302,7 +307,8 @@ class RankFM():
             self.v_i,
             self.v_uf,
             self.v_if,
-            self.regularization,
+            self.alpha,
+            self.beta,
             self.learning_rate,
             self.learning_schedule,
             self.learning_exponent,

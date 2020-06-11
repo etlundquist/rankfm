@@ -101,16 +101,16 @@ def assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if):
     assert np.isfinite(np.sum(v_if)), "item-feature factors [v_if] are not finite - try decreasing feature/sample_weight magnitudes"
 
 
-def reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if):
+def reg_penalty(alpha, beta, w_i, w_if, v_u, v_i, v_uf, v_if):
     """calculate the total regularization penalty for all model weights"""
 
     penalty = 0.0
-    penalty += np.sum(regularization * np.square(w_i))
-    penalty += np.sum(regularization * np.square(w_if))
-    penalty += np.sum(regularization * np.square(v_u))
-    penalty += np.sum(regularization * np.square(v_i))
-    penalty += np.sum(regularization * np.square(v_uf))
-    penalty += np.sum(regularization * np.square(v_if))
+    penalty += np.sum(alpha * np.square(w_i))
+    penalty += np.sum(alpha * np.square(v_u))
+    penalty += np.sum(alpha * np.square(v_i))
+    penalty += np.sum(beta * np.square(w_if))
+    penalty += np.sum(beta * np.square(v_uf))
+    penalty += np.sum(beta * np.square(v_if))
     return penalty
 
 # --------------------------------
@@ -129,7 +129,8 @@ def _fit(
     float[:, ::1] v_i,
     float[:, ::1] v_uf,
     float[:, ::1] v_if,
-    float regularization,
+    float alpha,
+    float beta,
     float learning_rate,
     str learning_schedule,
     float learning_exponent,
@@ -141,6 +142,9 @@ def _fit(
     #############################
     ### VARIABLE DECLARATIONS ###
     #############################
+
+    # constants
+    cdef float MARGIN = 1.0
 
     # matrix shapes/indicators
     cdef int N, U, I, F, P, Q
@@ -157,13 +161,13 @@ def _fit(
     cdef float sw, ut_ui, ut_uj
 
     # WARP sampling variables
-    cdef int margin = 1
     cdef int min_index
     cdef float pairwise_utility, min_pairwise_utility
 
     # loss function derivatives wrt model weights
     cdef float d_outer
-    cdef float d_reg = 2.0 * regularization
+    cdef float d_reg_a = 2.0 * alpha
+    cdef float d_reg_b = 2.0 * beta
     cdef float d_w_i = 1.0
     cdef float d_w_j = -1.0
     cdef float d_w_if, d_v_i, d_v_j, d_v_u, d_v_uf, d_v_if
@@ -253,7 +257,7 @@ def _fit(
                     min_index = j
                     min_pairwise_utility = pairwise_utility
 
-                if pairwise_utility < margin:
+                if pairwise_utility < MARGIN:
                     break
 
             # set the final sampled negative item index and calculate the WARP multiplier
@@ -269,14 +273,14 @@ def _fit(
             d_outer = 1.0 / (exp(pairwise_utility) + 1.0)
 
             # update the [item] weights
-            w_i[i] += eta * (sw * multiplier * (d_outer * d_w_i) - (d_reg * w_i[i]))
-            w_i[j] += eta * (sw * multiplier * (d_outer * d_w_j) - (d_reg * w_i[j]))
+            w_i[i] += eta * (sw * multiplier * (d_outer * d_w_i) - (d_reg_a * w_i[i]))
+            w_i[j] += eta * (sw * multiplier * (d_outer * d_w_j) - (d_reg_a * w_i[j]))
 
             # update the [item-feature] weights
             if x_if_any:
                 for q in range(Q):
                     d_w_if = x_if[i, q] - x_if[j, q]
-                    w_if[q] += eta * (sw * multiplier * (d_outer * d_w_if) - (d_reg * w_if[q]))
+                    w_if[q] += eta * (sw * multiplier * (d_outer * d_w_if) - (d_reg_b * w_if[q]))
 
             # update all [factor] weights
             for f in range(F):
@@ -298,9 +302,9 @@ def _fit(
                         d_v_u += v_if[q, f] * (x_if[i, q] - x_if[j, q])
 
                 # update the [user-factor] and [item-factor] weights with the final gradient values
-                v_u[u, f] += eta * (sw * multiplier * (d_outer * d_v_u) - (d_reg * v_u[u, f]))
-                v_i[i, f] += eta * (sw * multiplier * (d_outer * d_v_i) - (d_reg * v_i[i, f]))
-                v_i[j, f] += eta * (sw * multiplier * (d_outer * d_v_j) - (d_reg * v_i[j, f]))
+                v_u[u, f] += eta * (sw * multiplier * (d_outer * d_v_u) - (d_reg_a * v_u[u, f]))
+                v_i[i, f] += eta * (sw * multiplier * (d_outer * d_v_i) - (d_reg_a * v_i[i, f]))
+                v_i[j, f] += eta * (sw * multiplier * (d_outer * d_v_j) - (d_reg_a * v_i[j, f]))
 
                 # update the [user-feature-factor] weights if user features were supplied
                 if x_uf_any:
@@ -308,22 +312,22 @@ def _fit(
                         if x_uf[u, p] == 0.0:
                             continue
                         d_v_uf = x_uf[u, p] * (v_i[i, f] - v_i[j, f])
-                        v_uf[p, f] += eta * (sw * multiplier * (d_outer * d_v_uf) - (d_reg * v_uf[p, f]))
+                        v_uf[p, f] += eta * (sw * multiplier * (d_outer * d_v_uf) - (d_reg_b * v_uf[p, f]))
 
                 # update the [item-feature-factor] weights if item features were supplied
                 if x_if_any:
                     for q in range(Q):
-                        if x_if[i, q] - x_if[j, q] == 0:
+                        if x_if[i, q] - x_if[j, q] == 0.0:
                             continue
                         d_v_if = (x_if[i, q] - x_if[j, q]) * v_u[u, f]
-                        v_if[q, f] += eta * (sw * multiplier * (d_outer * d_v_if) - (d_reg * v_if[q, f]))
+                        v_if[q, f] += eta * (sw * multiplier * (d_outer * d_v_if) - (d_reg_b * v_if[q, f]))
 
         # [end epoch]: assert all model weights are finite
         assert_finite(w_i, w_if, v_u, v_i, v_uf, v_if)
 
         # report the penalized log-likelihood for this training epoch
         if verbose:
-            penalty = reg_penalty(regularization, w_i, w_if, v_u, v_i, v_uf, v_if)
+            penalty = reg_penalty(alpha, beta, w_i, w_if, v_u, v_i, v_uf, v_if)
             log_likelihood = round(log_likelihood - penalty, 2)
             print("\ntraining epoch:", epoch)
             print("log likelihood:", log_likelihood)
