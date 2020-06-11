@@ -5,7 +5,7 @@ from Cython.Build import cythonize
 # ----------------------------------------
 
 extensions = [
-    Extension("rankfm._rankfm", ["rankfm._rankfm.pyx"])
+    Extension("rankfm._rankfm", ["rankfm/_rankfm.pyx"])
 ]
 
 # define the main package setup function
