@@ -1,6 +1,13 @@
 # exclude data and private notebooks
 data/
+output/
+old/
+cython/
 examples/ignore/
+
+# cython generated files
+*.so
+*.html
 
 # system files
 *.DS_Store

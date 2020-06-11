@@ -15,13 +15,13 @@ jobs:
       - run:
           command: |
             pip install --upgrade pip
-            sudo pip install -r requirements.txt
-            python setup.py install
+            pip install -r requirements.txt
+            python setup.py build_ext --inplace
       - save_cache:
           key: deps-{{ .Branch }}-{{ checksum "requirements.txt" }}
           paths:
             - /usr/local/bin
             - /usr/local/lib/python3.6/site-packages
-      - run: python -m pyflakes rankfm/
+      - run: python -m flake8 --ignore W3,E3,E5,E74 rankfm/
       - run: python -m pytest -r Efp tests/
 

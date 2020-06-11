@@ -4,9 +4,9 @@
 [![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses [Bayesian Personalized Ranking (BPR)](https://arxiv.org/pdf/1205.2618.pdf) and a variant of [Weighted Approximate-Rank Pairwise (WARP)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.587.3946&rep=rep1&type=pdf) loss functions to learn model weights via Stochastic Gradient Descent (SGD). It can (optionally) incorporate individual sample weights and/or user/item auxiliary features to augment the main user/item interaction data for training.
+RankFM is a python implementation of the general Factorization Machines model class described in [Rendle 2010](https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf) adapted for collaborative filtering recommendation/ranking problems with implicit feedback user-item interaction data. It uses [Bayesian Personalized Ranking (BPR)](https://arxiv.org/pdf/1205.2618.pdf) and a variant of [Weighted Approximate-Rank Pairwise (WARP)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.587.3946&rep=rep1&type=pdf) loss to learn model weights via Stochastic Gradient Descent (SGD). It can (optionally) incorporate individual training sample weights and/or user/item auxiliary features to augment the main interaction data for model training.
 
-The core training/prediction/recommendation subroutines are converted to optimized machine code at runtime using the [Numba](http://numba.pydata.org/) LLVM JIT compiler. This makes it possible to scale model training and recommendation to millions of user/item interactions. Designed for ease-of-use, RankFM accepts both `pd.DataFrame` and `np.ndarray` inputs. You do not have to convert your data to `scipy.sparse` matrices or re-map user/item identifiers to array indexes prior to use - RankFM internally maps all user/item identifiers to zero-based integer indexes, but always converts its outputs back to the original user/item identifiers from your data, which can be arbitrary (non-zero-based, non-consecutive) integers or even strings.
+The core training/prediction/recommendation methods are written in [Cython](https://cython.org/). This makes it possible to scale to millions of users, items, and interactions. Designed for ease-of-use, RankFM accepts both `pd.DataFrame` and `np.ndarray` inputs. You do not have to convert your data to `scipy.sparse` matrices or re-map user/item identifiers to matrix indexes prior to use - RankFM internally maps all user/item identifiers to zero-based integer indexes, but always converts its outputs back to the original user/item identifiers from your data, which can be arbitrary (non-zero-based, non-consecutive) integers or even strings.
 
 In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes additional utilities `similiar_users()` and `similar_items()` to find the most similar users/items to a given user/item based on latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions have been included in the separate `evaluation` module to streamline model tuning and validation. See the **Quickstart** section below to get started, and the `/examples` folder for more in-depth jupyter notebook walkthroughs with several popular open-source data sets.
 
@@ -17,10 +17,28 @@ This package is currently under active development and should not yet be conside
 * Python 3.6+
 * numpy >= 1.15
 * pandas >= 0.24
-* scipy >= 1.1
-* numba >= 0.49
+* Cython >= 0.29
 
 ### Installation
+
+#### Prerequisites
+
+To install RankFM you will first need the [GNU Compiler Collection (GCC)](https://gcc.gnu.org/). This is a free open-source C/C++ compiler that will build RankFM's Cython extensions into platform-specific Python extension modules (e.g. `_rankfm.cpython-37m-darwin.so`).
+
+On Mac OSX I recommend installing via [Homebrew](https://brew.sh/):
+```
+brew install gcc
+```
+On Linux (e.g. AWS EC2) you can just use your system's built-in package manager:
+```
+sudo yum install gcc
+```
+To check whether GCC has been installed successfully simply run:
+```
+gcc --version
+```
+
+#### Package Installation
 
 You can install the latest published version from PyPI using `pip`:
 ```
@@ -30,7 +48,8 @@ Or alternatively install the current development build directly from GitHub:
 ```
 pip install git+https://github.com/etlundquist/rankfm.git#egg=rankfm
 ```
-It's highly recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure that all core numpy/scipy C extensions and linear algebra libraries have been installed and configured correctly. Anaconda: it just works.
+
+It's highly recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure that all core numpy C extensions and linear algebra libraries have been installed and configured correctly. Anaconda: it just works.
 
 ### Quickstart
 Let's work through a simple example of fitting a model, generating recommendations, evaluating performance, and assessing some item-item similarities. The data we'll be using here may already be somewhat familiar: you know it, you love it, it's the [MovieLens 1M](https://grouplens.org/datasets/movielens/1m/)!
@@ -48,12 +67,11 @@ It has just two columns: a `user_id` and an `item_id` (you can name these fields
 Now let's import the library, initialize our model, and fit on the training data:
 ```python
 from rankfm.rankfm import RankFM
-
-model = RankFM(factors=10, loss='bpr', regularization=0.01, learning_rate=0.10, learning_schedule='constant')
+model = RankFM(factors=20, loss='warp', max_samples=20, alpha=0.01, sigma=0.1, learning_rate=0.1, learning_schedule='invscaling')
 model.fit(interactions_train, epochs=20, verbose=True)
-# NOTE: this takes about 90 seconds for 750,000 interactions on my 2.3 GHz i5 8GB RAM MacBook
+# NOTE: this takes about 30 seconds for 750,000 interactions on my 2.3 GHz i5 8GB RAM MacBook
 ```
-If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training performance by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the `regularization`. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time. This example uses `BPR` loss which trains faster, but often `WARP` loss yields superior model performance.
+If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training performance by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the `regularization`. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time. Selecting `BPR` loss will lead to faster training times, but `WARP` loss typically yields superior model performance.
 
 Now let's generate some user-item model scores from the validation data:
 ```python
@@ -84,11 +102,11 @@ valid_precision = precision(model, interactions_valid, k=10)
 valid_recall = recall(model, interactions_valid, k=10)
 ```
 ```
-hit_rate: 0.764
-reciprocal_rank: 0.329
-dcg: 0.704
-precision: 0.152
-recall: 0.068
+hit_rate: 0.796
+reciprocal_rank: 0.339
+dcg: 0.734
+precision: 0.159
+recall: 0.077
 ```
 [That's a Bingo!](https://www.youtube.com/watch?v=q5pESPQpXxE)
 
