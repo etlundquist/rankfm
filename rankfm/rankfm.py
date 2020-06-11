@@ -5,7 +5,7 @@ rankfm main modeling class
 import numpy as np
 import pandas as pd
 
-from rankfm.cython_methods import _fit, _predict, _recommend
+from rankfm._rankfm import _fit, _predict, _recommend
 from rankfm.utils import get_data
 
 class RankFM():

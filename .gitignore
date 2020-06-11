@@ -1,7 +1,9 @@
 # exclude data and private notebooks
 data/
-examples/ignore/
+output/
+old/
 cython/
+examples/ignore/
 
 # cython generated files
 *.so
