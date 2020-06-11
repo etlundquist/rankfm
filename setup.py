@@ -1,11 +1,11 @@
 from setuptools import setup, Extension
-from Cython.Build import cythonize
+from Cython.Build import cythonize, build_ext
 
 # define the extension packages to include
 # ----------------------------------------
 
 extensions = [
-    Extension("rankfm._rankfm", ["rankfm/_rankfm.pyx"])
+    Extension("rankfm._rankfm", ["rankfm/_rankfm.c"])
 ]
 
 # define the main package setup function
@@ -13,7 +13,7 @@ extensions = [
 
 setup(
     name='rankfm',
-    version='0.2.0',
+    version='0.2.3',
     description='a python implementation of the generic factorization machines model class '
                 'adapted for collaborative filtering recommendation problems '
                 'with implicit feedback user-item interaction data '
