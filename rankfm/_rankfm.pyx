@@ -5,9 +5,11 @@
 # [C/Python] dependencies
 # -----------------------
 
-from libc.stdlib cimport malloc, free, rand
+from libc.stdlib cimport malloc, free
 from libc.math cimport log, exp, pow
+
 cimport cython
+cimport rankfm.mt19937ar as mt
 
 import numpy as np
 
@@ -162,7 +164,7 @@ def _fit(
 
     # WARP sampling variables
     cdef int min_index
-    cdef float pairwise_utility, min_pairwise_utility
+    cdef float pairwise_utility, min_pairwise_utility, multiplier
 
     # loss function derivatives wrt model weights
     cdef float d_outer
@@ -175,6 +177,9 @@ def _fit(
     #######################################
     ### PYTHON SET-UP PRIOR TO TRAINING ###
     #######################################
+
+    # initialize MT random state
+    mt.init_genrand(1492)
 
     # calculate matrix shapes
     N = interactions.shape[0]
@@ -245,7 +250,7 @@ def _fit(
 
                 # randomly sample an unobserved item (j) for the user
                 while True:
-                    j = rand() % I
+                    j = mt.genrand_int32() % I
                     if not lsearch(j, c_user_items[u], c_items_user[u]):
                         break
 
