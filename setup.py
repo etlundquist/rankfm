@@ -4,7 +4,7 @@ import glob
 from setuptools import Extension, setup
 
 NAME = 'rankfm'
-VERSION = '0.2.4'
+VERSION = '0.2.5'
 
 # define the extension packages to include
 # ----------------------------------------
