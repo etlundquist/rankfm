@@ -5,9 +5,12 @@
 # [C/Python] dependencies
 # -----------------------
 
-from libc.stdlib cimport malloc, free, rand
+from libc.stdlib cimport malloc, free
 from libc.math cimport log, exp, pow
+
 cimport cython
+cimport rankfm.mt19937ar as mt
+from cython.parallel import parallel, prange, threadid
 
 import numpy as np
 
@@ -136,6 +139,7 @@ def _fit(
     float learning_exponent,
     int max_samples,
     int epochs,
+    int num_threads,
     bint verbose
 ):
 
@@ -162,7 +166,7 @@ def _fit(
 
     # WARP sampling variables
     cdef int min_index
-    cdef float pairwise_utility, min_pairwise_utility
+    cdef float pairwise_utility, min_pairwise_utility, multiplier
 
     # loss function derivatives wrt model weights
     cdef float d_outer
@@ -175,6 +179,10 @@ def _fit(
     #######################################
     ### PYTHON SET-UP PRIOR TO TRAINING ###
     #######################################
+
+    # initialize random states
+    np.random.seed(1492)
+    mt.init_genrand(1986)
 
     # calculate matrix shapes
     N = interactions.shape[0]
@@ -224,7 +232,7 @@ def _fit(
         np.random.shuffle(shuffle_index)
         log_likelihood = 0.0
 
-        for r in range(N):
+        for r in prange(N, nogil=True, num_threads=num_threads):
 
             # locate the observed (user, item, sample-weight)
             row = shuffle_index_mv[r]
@@ -245,7 +253,7 @@ def _fit(
 
                 # randomly sample an unobserved item (j) for the user
                 while True:
-                    j = rand() % I
+                    j = mt.genrand_int32() % I
                     if not lsearch(j, c_user_items[u], c_items_user[u]):
                         break
 
@@ -341,6 +349,7 @@ def _fit(
 
 def _predict(
     float[:, ::1] pairs,
+    int num_threads,
     float[:, ::1] x_uf,
     float[:, ::1] x_if,
     float[::1] w_i,
@@ -370,7 +379,7 @@ def _predict(
     # initialize the output scores vector
     scores = np.empty(N, dtype=np.float32)
 
-    for row in range(N):
+    for row in prange(N, nogil=True, num_threads=num_threads):
 
         # locate the user/item to score
         u_flt = pairs[row, 0]
@@ -392,6 +401,7 @@ def _recommend(
     dict user_items,
     int n_items,
     bint filter_previous,
+    int num_threads,
     float[:, ::1] x_uf,
     float[:, ::1] x_if,
     float[::1] w_i,
@@ -434,7 +444,7 @@ def _recommend(
         else:
             # calculate the scores for all items wrt the current user
             u = int(u_flt)
-            for i in range(I):
+            for i in prange(I, nogil=True, num_threads=num_threads):
                 item_scores_mv[i] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
 
             # get a ranked list of item index positions for the user

@@ -2,6 +2,7 @@
 rankfm main modeling class
 """
 
+import multiprocessing
 import numpy as np
 import pandas as pd
 
@@ -249,7 +250,7 @@ class RankFM():
     # -------------------------------
 
 
-    def fit(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, verbose=False):
+    def fit(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, num_threads=1, verbose=False):
         """clear previous model state and learn new model weights using the input data
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
@@ -262,10 +263,10 @@ class RankFM():
         """
 
         self._reset_state()
-        self.fit_partial(interactions, user_features, item_features, sample_weight, epochs, verbose)
+        self.fit_partial(interactions, user_features, item_features, sample_weight, epochs, num_threads, verbose)
 
 
-    def fit_partial(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, verbose=False):
+    def fit_partial(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, num_threads=1, verbose=False):
         """learn or update model weights using the input data and resuming from the current model state
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
@@ -276,6 +277,11 @@ class RankFM():
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
         """
+
+        # validate user inputs
+        assert isinstance(epochs, int) and epochs >= 1, "[epochs] must be a positive integer"
+        assert isinstance(num_threads, int) and num_threads >= 0, "[num_threads] must be a non-negative integer"
+        assert isinstance(verbose, bool), "[verbose] must be a boolean value"
 
         if self.is_fit:
             self._init_interactions(interactions, sample_weight)
@@ -293,6 +299,10 @@ class RankFM():
             max_samples = self.max_samples
         else:
             raise ValueError('[loss] function not recognized')
+
+        # determine the number of threads to use if the user has specified all available (num_threads=0)
+        if num_threads == 0:
+            num_threads = multiprocessing.cpu_count()
 
         # NOTE: the cython internal fit method updates the model weights in place via memoryviews
         _fit(
@@ -314,6 +324,7 @@ class RankFM():
             self.learning_exponent,
             max_samples,
             epochs,
+            num_threads,
             verbose
         )
 
@@ -321,7 +332,7 @@ class RankFM():
         return self
 
 
-    def predict(self, pairs, cold_start='nan'):
+    def predict(self, pairs, cold_start='nan', num_threads=1):
         """calculate the predicted pointwise utilities for all (user, item) pairs
 
         :param pairs: dataframe of [user, item] pairs to score
@@ -334,6 +345,10 @@ class RankFM():
         assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
 
+        # determine the number of threads to use if the user has specified all available (num_threads=0)
+        if num_threads == 0:
+            num_threads = multiprocessing.cpu_count()
+
         pred_pairs = pd.DataFrame(get_data(pairs).copy(), columns=['user_id', 'item_id'])
         pred_pairs['user_id'] = pred_pairs['user_id'].map(self.user_to_index)
         pred_pairs['item_id'] = pred_pairs['item_id'].map(self.item_to_index)
@@ -341,6 +356,7 @@ class RankFM():
 
         scores = _predict(
             pred_pairs,
+            num_threads,
             self.x_uf,
             self.x_if,
             self.w_i,
@@ -359,7 +375,7 @@ class RankFM():
             raise ValueError("param [cold_start] must be set to either 'nan' or 'drop'")
 
 
-    def recommend(self, users, n_items=10, filter_previous=False, cold_start='nan'):
+    def recommend(self, users, n_items=10, filter_previous=False, cold_start='nan', num_threads=1):
         """calculate the topN items for each user
 
         :param users: iterable of user identifiers for which to generate recommendations
@@ -372,12 +388,17 @@ class RankFM():
         assert getattr(users, '__iter__', False), "[users] must be an iterable (e.g. list, array, series)"
         assert self.is_fit, "you must fit the model prior to generating recommendations"
 
+        # determine the number of threads to use if the user has specified all available (num_threads=0)
+        if num_threads == 0:
+            num_threads = multiprocessing.cpu_count()
+
         user_idx = np.ascontiguousarray(pd.Series(users).map(self.user_to_index), dtype=np.float32)
         rec_items = _recommend(
             user_idx,
             self.user_items,
             n_items,
             filter_previous,
+            num_threads,
             self.x_uf,
             self.x_if,
             self.w_i,
