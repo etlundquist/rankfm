@@ -17,24 +17,23 @@ This package is currently under active development and should not yet be conside
 * Python 3.6+
 * numpy >= 1.15
 * pandas >= 0.24
-* Cython >= 0.29
 
 ### Installation
 
 #### Prerequisites
 
-To install RankFM you will first need the [GNU Compiler Collection (GCC)](https://gcc.gnu.org/). This is a free open-source C/C++ compiler that will build RankFM's Cython extensions into platform-specific Python extension modules (e.g. `_rankfm.cpython-37m-darwin.so`).
+To install RankFM's C extensions you will need the [GNU Compiler Collection (GCC)](https://gcc.gnu.org/). Check to see whether you already have it installed:
+```
+gcc --version
+```
 
-On Mac OSX I recommend installing via [Homebrew](https://brew.sh/):
+If you don't have it already you can easily install it using [Homebrew](https://brew.sh/) on OSX or your default linux package manager:
 ```
+# OSX
 brew install gcc
-```
-On Linux (e.g. AWS EC2) you can just use your system's built-in package manager:
-```
+# LINUX
 sudo yum install gcc
-```
-To check whether GCC has been installed successfully simply run:
-```
+# ensure [gcc] has been installed correctly and is on the system PATH
 gcc --version
 ```
 

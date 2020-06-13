@@ -277,6 +277,11 @@ class RankFM():
         :return: self
         """
 
+        # validate user inputs
+        assert isinstance(epochs, int) and epochs >= 1, "[epochs] must be a positive integer"
+        assert isinstance(verbose, bool), "[verbose] must be a boolean value"
+
+        # initialize internal data representations
         if self.is_fit:
             self._init_interactions(interactions, sample_weight)
             self._init_features(user_features, item_features)

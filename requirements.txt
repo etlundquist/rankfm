@@ -1,7 +1,6 @@
 # core package requirements
 numpy>=1.15
 pandas>=0.24
-Cython>=0.29
 
 # additional development/testing requirements
 flake8>=3.5
