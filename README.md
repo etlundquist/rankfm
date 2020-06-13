@@ -72,7 +72,7 @@ model = RankFM(factors=20, loss='warp', max_samples=20, alpha=0.01, sigma=0.1, l
 model.fit(interactions_train, epochs=20, verbose=True)
 # NOTE: this takes about 30 seconds for 750,000 interactions on my 2.3 GHz i5 8GB RAM MacBook
 ```
-If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training performance by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the `regularization`. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time. Selecting `BPR` loss will lead to faster training times, but `WARP` loss typically yields superior model performance.
+If you set `verbose=True` the model will print the current epoch number as well as the epoch's log-likelihood during training. This can be useful to gauge both computational speed and training gains by epoch. If the log likelihood is not increasing then try upping the `learning_rate` or lowering the (`alpha`, `beta`) regularization strength terms. If the log likelihood is starting to bounce up and down try lowering the `learning_rate` or using `learning_schedule='invscaling'` to decrease the learning rate over time. If you run into overflow errors then decrease the feature and/or sample-weight magnitudes and try upping `beta`, especially if you have a small number of dense user-features and/or item-features. Selecting `BPR` loss will lead to faster training times, but `WARP` loss typically yields superior model performance.
 
 Now let's generate some user-item model scores from the validation data:
 ```python
