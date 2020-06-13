@@ -31,8 +31,10 @@ If you don't have it already you can easily install it using [Homebrew](https://
 ```
 # OSX
 brew install gcc
-# LINUX
+
+# linux
 sudo yum install gcc
+
 # ensure [gcc] has been installed correctly and is on the system PATH
 gcc --version
 ```
