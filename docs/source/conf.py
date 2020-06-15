@@ -14,7 +14,13 @@
 
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../..'))
+import subprocess
+
+repo_root = os.path.abspath('../..')
+sys.path.insert(0, repo_root)
+
+cmd = "cd {} && python setup.py build_ext --inplace".format(repo_root)
+subprocess.run(cmd, shell=True, check=True)
 
 # import dependencies
 # -------------------
