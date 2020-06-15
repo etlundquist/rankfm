@@ -5,4 +5,8 @@ pandas>=0.24
 # additional development/testing requirements
 flake8>=3.5
 pytest>=5.3
+
+# autodocumentation
+Sphinx==1.8
 sphinx-rtd-theme==0.4
+
