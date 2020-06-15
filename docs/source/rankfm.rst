@@ -1,7 +1,7 @@
 RankFM
 ======
 
-.. autoclass:: rankfm.rankfm.RankFM
-   :members:
-   :undoc-members:
+.. automodule:: rankfm.rankfm
+    :members:
+    :undoc-members:
 
