@@ -5,3 +5,4 @@ pandas>=0.24
 # additional development/testing requirements
 flake8>=3.5
 pytest>=5.3
+sphinx-rtd-theme==0.4
