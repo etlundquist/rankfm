@@ -19,6 +19,7 @@
 # import dependencies
 # -------------------
 
+import rankfm
 import sphinx_rtd_theme
 
 # -- Project information -----------------------------------------------------
