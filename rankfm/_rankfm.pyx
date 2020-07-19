@@ -217,7 +217,6 @@ def _fit(
 
     for epoch in range(epochs):
 
-        # set the learning rate for this training epoch
         if learning_schedule == 'constant':
             eta = learning_rate
         elif learning_schedule == 'invscaling':
@@ -225,7 +224,6 @@ def _fit(
         else:
             raise ValueError('unknown [learning_schedule]')
 
-        # re-shuffle the interaction data for each epoch
         np.random.shuffle(shuffle_index)
         log_likelihood = 0.0
 

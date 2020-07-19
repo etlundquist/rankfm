@@ -11,9 +11,10 @@ The core (training, prediction, recommendation) methods are written in [Cython](
 
 In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM includes additional utilities `similiar_users()` and `similar_items()` to find the most similar users/items to a given user/item based on latent factor space embeddings. A number of popular recommendation/ranking evaluation metric functions have been included in the separate `evaluation` module to streamline model tuning and validation.
 
-See the **Quickstart** section below to get started and the `/examples` folder for more in-depth jupyter notebook walkthroughs using several popular open-source data sets. For more comprehensive documentation on the main model class and the included evaluation module see the [Online Documentation](https://rankfm.readthedocs.io/en/latest/).
-
-This package is currently under active development and should not yet be considered fully stable. The core functionality is in place and working, but has not yet been rigorously tested against a wide variety of real-world data sets, modeling objectives, edge cases, user errors, etc. If you do find a problem or have suggestions for improvement please let me know!
+* see the **Quickstart** section below to get started with the basic functionality
+* see the `/examples` folder for more in-depth jupyter notebook walkthroughs with several popular open-source data sets
+* see the [Online Documentation](https://rankfm.readthedocs.io/en/latest/) for more comprehensive documentation on the main model class and separate evaluation module
+* see the [Medium Article](https://towardsdatascience.com/factorization-machines-for-item-recommendation-with-implicit-feedback-data-5655a7c749db) for contextual motivation and a detailed mathematical description of the algorithm
 
 ---
 ### Dependencies
@@ -150,10 +151,3 @@ model.similar_items(2997, n_items=10)
 3481      High Fidelity (2000)
 ```
 [Let's get weird...](https://www.youtube.com/watch?v=lIpev8JXJHQ&t=5s)
-
----
-That's all for now. To see more in-depth worked examples in jupyter notebook format head to the `/examples` folder. Be sure to check back for added functionality and updated PyPI releases in the near future. There's more to come - stay tuned...
-
----
-![under construction](./images/UnderConstruction.png)
-
