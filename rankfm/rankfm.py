@@ -12,7 +12,7 @@ class RankFM():
     """Factorization Machines for Ranking Problems with Implicit Feedback Data"""
 
     def __init__(self, factors=10, loss='bpr', max_samples=10, alpha=0.01, beta=0.1, sigma=0.1, learning_rate=0.1, learning_schedule='constant', learning_exponent=0.25):
-        """store hyperparameters and initialize internal data
+        """store hyperparameters and initialize internal model state
 
         :param factors: latent factor rank
         :param loss: optimization/loss function to use for training: ['bpr', 'warp']
@@ -26,7 +26,7 @@ class RankFM():
         :return: None
         """
 
-        # validate user inputs
+        # validate user input
         assert isinstance(factors, int) and factors >= 1, "[factors] must be a positive integer"
         assert isinstance(loss, str) and loss in ('bpr', 'warp'), "[loss] must be in ('bpr', 'warp')"
         assert isinstance(max_samples, int) and max_samples > 0, "[max_samples] must be a positive integer"
@@ -37,7 +37,7 @@ class RankFM():
         assert isinstance(learning_schedule, str) and learning_schedule in ('constant', 'invscaling'), "[learning_schedule] must be in ('constant', 'invscaling')"
         assert isinstance(learning_exponent, float) and learning_exponent > 0.0, "[learning_exponent] must be a positive float"
 
-        # store hyperparameters
+        # store model hyperparameters
         self.factors = factors
         self.loss = loss
         self.max_samples = max_samples
@@ -58,47 +58,47 @@ class RankFM():
 
 
     def _reset_state(self):
-        """initialize/reset all [user/item/feature] indexes and model weights"""
+        """initialize or reset internal model state"""
 
-        # user/item ID/INDEX arrays
+        # [ID, IDX] arrays
         self.user_id = None
         self.item_id = None
         self.user_idx = None
         self.item_idx = None
 
-        # user/item ID <--> INDEX mappings
+        # [ID <-> IDX] mappings
         self.index_to_user = None
         self.index_to_item = None
         self.user_to_index = None
         self.item_to_index = None
 
-        # user/item interactions and sample importance weights
+        # user/item interactions and importance weights
         self.interactions = None
         self.sample_weight = None
 
-        # dictionary of observed items for each user
+        # set of observed items for each user
         self.user_items = None
 
-        # user/item features
+        # [user, item] features
         self.x_uf = None
         self.x_if = None
 
-        # item and item feature weights
+        # [item, item-feature] scalar weights
         self.w_i = None
         self.w_if = None
 
-        # user/item/user-feature/item-feature latent factors
+        # [user, item, user-feature, item-feature] latent factors
         self.v_u = None
         self.v_i = None
         self.v_uf = None
         self.v_if = None
 
-        # internal model state
+        # internal model state indicator
         self.is_fit = False
 
 
     def _init_all(self, interactions, user_features=None, item_features=None, sample_weight=None):
-        """index the raw interaction and user/item features data to numpy arrays
+        """index the interaction data and user/item features and initialize model weights
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
         :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
@@ -107,16 +107,15 @@ class RankFM():
         :return: None
         """
 
-        # check user data inputs
         assert isinstance(interactions, (np.ndarray, pd.DataFrame)), "[interactions] must be np.ndarray or pd.dataframe"
         assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
 
-        # save the unique lists of users/items in terms of original identifiers
+        # save unique arrays of users/items in terms of original identifiers
         interactions_df = pd.DataFrame(get_data(interactions), columns=['user_id', 'item_id'])
         self.user_id = pd.Series(np.sort(np.unique(interactions_df['user_id'])))
         self.item_id = pd.Series(np.sort(np.unique(interactions_df['item_id'])))
 
-        # create zero-based index position to identifier mappings
+        # create zero-based index to identifier mappings
         self.index_to_user = self.user_id
         self.index_to_item = self.item_id
 
@@ -146,19 +145,17 @@ class RankFM():
         :return: None
         """
 
-        # check user data inputs
         assert isinstance(interactions, (np.ndarray, pd.DataFrame)), "[interactions] must be np.ndarray or pd.dataframe"
         assert interactions.shape[1] == 2, "[interactions] should be: [user_id, item_id]"
 
         # map the raw user/item identifiers to internal zero-based index positions
         # NOTE: any user/item pairs not found in the existing indexes will be dropped
-
         self.interactions = pd.DataFrame(get_data(interactions).copy(), columns=['user_id', 'item_id'])
         self.interactions['user_id'] = self.interactions['user_id'].map(self.user_to_index).astype(np.int32)
         self.interactions['item_id'] = self.interactions['item_id'].map(self.item_to_index).astype(np.int32)
         self.interactions = self.interactions.rename({'user_id': 'user_idx', 'item_id': 'item_idx'}, axis=1).dropna()
 
-        # store the sample weights internally or create a vector of ones if not passed
+        # store the sample weights internally or generate a vector of ones if not given
         if sample_weight is not None:
             assert isinstance(sample_weight, (np.ndarray, pd.Series)), "[sample_weight] must be np.ndarray or pd.series"
             assert sample_weight.ndim == 1, "[sample_weight] must a vector (ndim=1)"
@@ -167,9 +164,7 @@ class RankFM():
         else:
             self.sample_weight = np.ones(len(self.interactions), dtype=np.float32)
 
-        # create python/numba lookup dictionaries containing the set of observed items for each user
-        # NOTE: the typed numba dictionary will be used to sample unobserved items during training
-        # NOTE: the interactions data must be converted to np.ndarray prior to training to use @njit
+        # create a dictionary containing the set of observed items for each user
         # NOTE: if the model has been previously fit extend rather than replace the itemset for each user
 
         if self.is_fit:
@@ -178,7 +173,7 @@ class RankFM():
         else:
             self.user_items = self.interactions.sort_values(['user_idx', 'item_idx']).groupby('user_idx')['item_idx'].apply(np.array, dtype=np.int32).to_dict()
 
-        # format the interactions data as a c-contiguous integer array for cython
+        # format the interactions data as a c-contiguous integer array for cython use
         self.interactions = np.ascontiguousarray(self.interactions, dtype=np.int32)
 
 
@@ -186,8 +181,8 @@ class RankFM():
     def _init_features(self, user_features=None, item_features=None):
         """initialize the user/item features given existing internal user/item indexes
 
-        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
-        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ... , uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ... , if_n]
         :return: None
         """
 
@@ -216,8 +211,13 @@ class RankFM():
             self.x_if = np.zeros([len(self.item_idx), 1], dtype=np.float32)
 
 
-    def _init_weights(self, user_features, item_features):
-        """initialize model weights given user/item and user_feature/item_feature indexes/shapes"""
+    def _init_weights(self, user_features=None, item_features=None):
+        """initialize model weights given user/item and user-feature/item-feature indexes/shapes
+
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ... , uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ... , if_n]
+        :return: None
+        """
 
         # initialize scalar weights as ndarrays of zeros
         self.w_i = np.zeros(len(self.item_idx)).astype(np.float32)
@@ -253,8 +253,8 @@ class RankFM():
         """clear previous model state and learn new model weights using the input data
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
-        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
-        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ... , uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ... , if_n]
         :param sample_weight: vector of importance weights for each observed interaction
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
@@ -263,25 +263,24 @@ class RankFM():
 
         self._reset_state()
         self.fit_partial(interactions, user_features, item_features, sample_weight, epochs, verbose)
+        return self
 
 
     def fit_partial(self, interactions, user_features=None, item_features=None, sample_weight=None, epochs=1, verbose=False):
         """learn or update model weights using the input data and resuming from the current model state
 
         :param interactions: dataframe of observed user/item interactions: [user_id, item_id]
-        :param user_features: dataframe of user metadata features: [user_id, uf_1, ..., uf_n]
-        :param item_features: dataframe of item metadata features: [item_id, if_1, ..., if_n]
+        :param user_features: dataframe of user metadata features: [user_id, uf_1, ... , uf_n]
+        :param item_features: dataframe of item metadata features: [item_id, if_1, ... , if_n]
         :param sample_weight: vector of importance weights for each observed interaction
         :param epochs: number of training epochs (full passes through observed interactions)
         :param verbose: whether to print epoch number and log-likelihood during training
         :return: self
         """
 
-        # validate user inputs
         assert isinstance(epochs, int) and epochs >= 1, "[epochs] must be a positive integer"
         assert isinstance(verbose, bool), "[verbose] must be a boolean value"
 
-        # initialize internal data representations
         if self.is_fit:
             self._init_interactions(interactions, sample_weight)
             self._init_features(user_features, item_features)
@@ -299,7 +298,9 @@ class RankFM():
         else:
             raise ValueError('[loss] function not recognized')
 
-        # NOTE: the cython internal fit method updates the model weights in place via memoryviews
+        # NOTE: the cython private _fit() method updates the model weights in-place via typed memoryviews
+        # NOTE: therefore there's nothing returned explicitly by either method
+
         _fit(
             self.interactions,
             self.sample_weight,
@@ -334,7 +335,6 @@ class RankFM():
         :return: np.array of real-valued model scores
         """
 
-        # check user data inputs
         assert isinstance(pairs, (np.ndarray, pd.DataFrame)), "[pairs] must be np.ndarray or pd.dataframe"
         assert pairs.shape[1] == 2, "[pairs] should be: [user_id, item_id]"
         assert self.is_fit, "you must fit the model prior to generating predictions"
@@ -410,7 +410,6 @@ class RankFM():
         :return: np.array of topN most similar items wrt latent factor representations
         """
 
-        # ensure that the model has been fit before attempting to generate predictions
         assert item_id in self.item_id.values, "you must select an [item_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
@@ -437,7 +436,6 @@ class RankFM():
         :return: np.array of topN most similar users wrt latent factor representations
         """
 
-        # ensure that the model has been fit before attempting to generate predictions
         assert user_id in self.user_id.values, "you must select an [user_id] present in the training data"
         assert self.is_fit, "you must fit the model prior to generating similarities"
 
