@@ -54,7 +54,7 @@ Or alternatively install the current development build directly from GitHub:
 pip install git+https://github.com/etlundquist/rankfm.git#egg=rankfm
 ```
 
-It's highly recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure that all core numpy C extensions and linear algebra libraries have been installed and configured correctly. Anaconda: it just works.
+It's highly recommended that you use an [Anaconda](https://www.anaconda.com/) base environment to ensure that all core numpy C extensions and linear algebra libraries have been installed and configured correctly. Anaconda: it just works. Additionally, use python verions 3.6 - 3.7 to avoid build errors with the PYPI wheel.
 
 ### Quickstart
 Let's work through a simple example of fitting a model, generating recommendations, evaluating performance, and assessing some item-item similarities. The data we'll be using here may already be somewhat familiar: you know it, you love it, it's the [MovieLens 1M](https://grouplens.org/datasets/movielens/1m/)!
