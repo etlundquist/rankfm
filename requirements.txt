@@ -1,3 +1,4 @@
+# ensure python version is python 3.6 or 3.7 else you face build errors
 # core package requirements
 numpy>=1.15
 pandas>=0.24
