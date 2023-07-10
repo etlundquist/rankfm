@@ -24,8 +24,8 @@ extensions = [
     Extension(
         name='rankfm._rankfm',
         sources=['rankfm/_rankfm.{ext}'.format(ext=ext), 'rankfm/mt19937ar/mt19937ar.c'],
-        # extra_compile_args=compile_args,
-        extra_compile_args={'gcc': ['/Qstd=c99']},
+        extra_compile_args=compile_args,
+        # extra_compile_args={'gcc': ['/Qstd=c99']},
     )
 ]
 
