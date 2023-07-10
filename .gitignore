@@ -34,3 +34,6 @@ MANIFEST
 # spark stuff
 */derby.log
 */metastore_db/
+
+docker-compose.yaml
+Dockerfile

@@ -1,5 +1,7 @@
 # RankFM
 
+[Original author: Eric Lundquist](https://github.com/etlundquist/rankfm)
+
 [![PyPI version](https://badge.fury.io/py/rankfm.svg)](https://badge.fury.io/py/rankfm)
 [![CircleCI](https://circleci.com/gh/etlundquist/rankfm.svg?style=shield)](https://circleci.com/gh/etlundquist/rankfm)
 [![Documentation Status](https://readthedocs.org/projects/rankfm/badge/?version=latest)](https://rankfm.readthedocs.io/en/latest/?badge=latest)
@@ -18,9 +20,9 @@ In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM 
 
 ---
 ### Dependencies
-* Python 3.6+
+* Python 3.9+
 * numpy >= 1.15
-* pandas >= 0.24
+* pandas >= 1.5
 
 ### Installation
 

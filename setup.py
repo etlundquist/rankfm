@@ -1,10 +1,5 @@
-import os
-import sys
 import glob
 from setuptools import Extension, setup
-
-NAME = 'rankfm'
-VERSION = '0.2.5'
 
 # define the extension packages to include
 # ----------------------------------------
@@ -29,7 +24,8 @@ extensions = [
     Extension(
         name='rankfm._rankfm',
         sources=['rankfm/_rankfm.{ext}'.format(ext=ext), 'rankfm/mt19937ar/mt19937ar.c'],
-        extra_compile_args=compile_args
+        # extra_compile_args=compile_args,
+        extra_compile_args={'gcc': ['/Qstd=c99']},
     )
 ]
 
@@ -37,25 +33,31 @@ extensions = [
 if use_cython:
     extensions = cythonize(extensions)
 
+# read the contents of your README file
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 # define the main package setup function
 # --------------------------------------
-
 setup(
-    name=NAME,
-    version=VERSION,
+    name='RankFM',
+    version='0.2.6',
     description='a python implementation of the generic factorization machines model class '
                 'adapted for collaborative filtering recommendation problems '
                 'with implicit feedback user-item interaction data '
                 'and (optionally) additional user/item side features',
-    author='Eric Lundquist',
-    author_email='e.t.lundquist@gmail.com',
-    url='https://github.com/etlundquist/rankfm',
+    author='ErraticO',
+    author_email='wyh123132@163.com',
+    url='https://github.com/ErraticO/rankfm',
     keywords=['machine', 'learning', 'recommendation', 'factorization', 'machines', 'implicit'],
     license='GNU General Public License v3.0',
-    packages=['rankfm'],
+    packages=['RankFM'],
     ext_modules=extensions,
     zip_safe=False,
-    python_requires='>=3.6',
-    install_requires=['numpy>=1.15', 'pandas>=0.24']
+    python_requires='>=3.9',
+    install_requires=['numpy>=1.15', 'pandas>=1.5'],
+    long_description=long_description,
+    long_description_content_type="text/markdown",
 )
 
