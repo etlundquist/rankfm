@@ -332,8 +332,6 @@ def _fit(
         if verbose:
             penalty = reg_penalty(alpha, beta, w_i, w_if, v_u, v_i, v_uf, v_if)
             log_likelihood = round(log_likelihood - penalty, 2)
-            print("\ntraining epoch:", epoch)
-            print("log likelihood:", log_likelihood)
 
     # [end training]: free memory of c-arrays before exiting function
     for u in range(U):

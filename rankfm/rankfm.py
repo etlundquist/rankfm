@@ -194,7 +194,7 @@ class RankFM():
             if np.array_equal(sorted(x_uf.index.values), self.user_idx):
                 self.x_uf = np.ascontiguousarray(x_uf.sort_index(), dtype=np.float32)
             else:
-                raise KeyError('the users in [user_features] do not match the users in [interactions]')
+                raise KeyError('the users in [user_features] do not match the users in [interactions], user id may be missing or duplicated in [user_features]')
         else:
             self.x_uf = np.zeros([len(self.user_idx), 1], dtype=np.float32)
 
@@ -206,7 +206,7 @@ class RankFM():
             if np.array_equal(sorted(x_if.index.values), self.item_idx):
                 self.x_if = np.ascontiguousarray(x_if.sort_index(), dtype=np.float32)
             else:
-                raise KeyError('the items in [item_features] do not match the items in [interactions]')
+                raise KeyError('the items in [item_features] do not match the items in [interactions], , item id may be missing or duplicated in [item_features]')
         else:
             self.x_if = np.zeros([len(self.item_idx), 1], dtype=np.float32)
 
