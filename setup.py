@@ -4,7 +4,7 @@ import glob
 from setuptools import Extension, setup
 
 NAME = 'rankfm'
-VERSION = '0.2.5'
+VERSION = '0.2.6'
 
 # define the extension packages to include
 # ----------------------------------------
@@ -21,8 +21,11 @@ else:
     ext = 'pyx'
 
 # add compiler arguments to optimize machine code and ignore warnings
-disabled_warnings = ['-Wno-unused-function', '-Wno-uninitialized']
-compile_args = ['-O2', '-ffast-math'] + disabled_warnings
+if sys.platform == "linux":
+    disabled_warnings = ['-Wno-unused-function', '-Wno-uninitialized']
+    compile_args = ['-O2', '-ffast-math'] + disabled_warnings
+else:
+    compile_args = {'gcc': ['/Qstd=c99']}
 
 # define the _rankfm extension including the wrapped MT module
 extensions = [
@@ -37,9 +40,13 @@ extensions = [
 if use_cython:
     extensions = cythonize(extensions)
 
+# read the contents of your README file
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 # define the main package setup function
 # --------------------------------------
-
 setup(
     name=NAME,
     version=VERSION,
@@ -56,6 +63,8 @@ setup(
     ext_modules=extensions,
     zip_safe=False,
     python_requires='>=3.6',
-    install_requires=['numpy>=1.15', 'pandas>=0.24']
+    install_requires=['numpy>=1.15', 'pandas>=0.24'],
+    long_description=long_description,
+    long_description_content_type="text/markdown",
 )
 
