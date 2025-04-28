@@ -1,50 +1,21 @@
-#!python
-#cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
+# cython: boundscheck=False, wraparound=False, cdivision=True, language_level=3
 
 # -----------------------
 # [C/Python] dependencies
 # -----------------------
-
-from libc.stdlib cimport malloc, free
-from libc.math cimport log, exp, pow
+from libc.math cimport log, exp, pow, isnan
 
 cimport cython
 cimport rankfm.mt19937ar as mt
+
+from cython.parallel import prange
+cimport numpy as cnp
 
 import numpy as np
 
 # --------------------
 # [C] helper functions
 # --------------------
-
-cdef int lsearch(int item, int *items, int n) nogil:
-    """linear search for a given item in a sorted array of items"""
-
-    cdef int i
-    for i in range(n):
-        if item == items[i]:
-            return 1
-    return 0
-
-
-cdef int bsearch(int item, int *items, int n) nogil:
-    """binary search for a given item in a sorted array of items"""
-
-    cdef int lo = 0
-    cdef int hi = n - 1
-    cdef int md
-
-    while lo <= hi:
-        md = int(lo + (hi - lo) / 2)
-        if items[md] == item:
-            return 1
-        elif (items[md] < item):
-            lo = md + 1
-        else:
-            hi = md - 1
-    return 0
-
-
 cdef float compute_ui_utility(
     int F,
     int P,
@@ -197,20 +168,6 @@ def _fit(
     shuffle_index = np.arange(N, dtype=np.int32)
     cdef int[:] shuffle_index_mv = shuffle_index
 
-    # count the total number of items for each user
-    items_user = {user: len(items) for user, items in user_items.items()}
-
-    # create c-arrays: number of items and sorted array of items for each user
-    cdef int *c_items_user = <int*>malloc(U * sizeof(int))
-    cdef int **c_user_items = <int**>malloc(U * sizeof(int*))
-
-    # fill the c-arrays from the P-arrays to use later in NOGIL blocks
-    for u in range(U):
-        c_items_user[u] = items_user[u]
-        c_user_items[u] = <int*>malloc(c_items_user[u] * sizeof(int))
-        for i in range(c_items_user[u]):
-            c_user_items[u][i] = user_items[u][i]
-
     ################################
     ### MAIN TRAINING EPOCH LOOP ###
     ################################
@@ -249,7 +206,7 @@ def _fit(
                 # randomly sample an unobserved item (j) for the user
                 while True:
                     j = mt.genrand_int32() % I
-                    if not lsearch(j, c_user_items[u], c_items_user[u]):
+                    if j not in user_items[u]:
                         break
 
                 # compute the utility score of the unobserved (u, j) pair and the subsequent pairwise utility
@@ -335,12 +292,6 @@ def _fit(
             print("\ntraining epoch:", epoch)
             print("log likelihood:", log_likelihood)
 
-    # [end training]: free memory of c-arrays before exiting function
-    for u in range(U):
-        free(c_user_items[u])
-    free(c_items_user)
-    free(c_user_items)
-
 
 def _predict(
     float[:, ::1] pairs,
@@ -354,40 +305,39 @@ def _predict(
     float[:, ::1] v_if,
 ):
 
-    # declare variables
-    cdef int N, P, Q, F
-    cdef int x_uf_any, x_if_any
+    cdef int N = pairs.shape[0]
+    cdef int P = v_uf.shape[0]
+    cdef int Q = v_if.shape[0]
+    cdef int F = v_u.shape[1]
+    cdef int x_uf_any = int(np.asarray(x_uf).any())
+    cdef int x_if_any = int(np.asarray(x_if).any())
+
+    cdef cnp.float_t[::1] scores = np.empty(N, dtype=np.float32)
+
     cdef int row, u, i
     cdef float u_flt, i_flt
 
-    # calculate matrix shapes
-    N = pairs.shape[0]
-    P = v_uf.shape[0]
-    Q = v_if.shape[0]
-    F = v_u.shape[1]
+    cdef float nan_value = float('nan')
 
-    # determine whether any user-features/item-features were supplied
-    x_uf_any = int(np.asarray(x_uf).any())
-    x_if_any = int(np.asarray(x_if).any())
-
-    # initialize the output scores vector
-    scores = np.empty(N, dtype=np.float32)
-
-    for row in range(N):
-
-        # locate the user/item to score
+    for row in prange(N, nogil=True):
         u_flt = pairs[row, 0]
         i_flt = pairs[row, 1]
 
-        # set the score to nan if the user or item not found
-        if np.isnan(u_flt) or np.isnan(i_flt):
-            scores[row] = np.nan
+        if isnan(u_flt) or isnan(i_flt):
+            scores[row] = nan_value
         else:
-            # calculate the pointwise utility score for the (u, i) pair
-            u, i = int(u_flt), int(i_flt)
-            scores[row] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
+            u = <int>u_flt
+            i = <int>i_flt
+            scores[row] = compute_ui_utility(
+                F, P, Q,
+                x_uf[u], x_if[i],
+                w_i[i], w_if,
+                v_u[u], v_i[i],
+                v_uf, v_if,
+                x_uf_any, x_if_any
+            )
 
-    return scores
+    return np.asarray(scores)
 
 
 def _recommend(
@@ -404,7 +354,6 @@ def _recommend(
     float[:, ::1] v_uf,
     float[:, ::1] v_if
 ):
-
     # declare variables
     cdef int U, I, P, Q, F
     cdef int x_uf_any, x_if_any
@@ -437,7 +386,7 @@ def _recommend(
         else:
             # calculate the scores for all items wrt the current user
             u = int(u_flt)
-            for i in range(I):
+            for i in prange(I, schedule='static', nogil=True):
                 item_scores_mv[i] = compute_ui_utility(F, P, Q, x_uf[u], x_if[i], w_i[i], w_if, v_u[u], v_i[i], v_uf, v_if, x_uf_any, x_if_any)
 
             # get a ranked list of item index positions for the user
@@ -458,4 +407,3 @@ def _recommend(
             rec_items[row] = selected_items
 
     return rec_items
-

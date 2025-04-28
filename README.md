@@ -18,7 +18,7 @@ In addition to the familiar `fit()`, `predict()`, `recommend()` methods, RankFM 
 
 ---
 ### Dependencies
-* Python 3.6+
+* Python 3.8+
 * numpy >= 1.15
 * pandas >= 0.24
 

@@ -1,36 +1,16 @@
-# exclude data and private notebooks
-data/
-output/
-old/
-cython/
-examples/ignore/
-
-# cython generated files
-*.so
-*.html
-
-# system files
-*.DS_Store
-*.pyc
-*.ipynb_checkpoints
-__pycache__/
-
-# distribution / packaging
-.Python
 build/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+.idea/
+__pycache__/
+.pytest_cache/
+rankfmc.egg-info/
+dist/
 
-# spark stuff
-*/derby.log
-*/metastore_db/
+# Compiled product when testing
+rankfmc/_rankfm.c
+rankfmc/*.pyd
+
+# test data
+data/
+
+# test script in local
+tests_local
